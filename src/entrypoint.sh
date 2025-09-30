@@ -68,10 +68,11 @@ setup_and_run() {
     cat > /tmp/crontab.tmp << EOF
 SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+BACKUP_SOURCE_DIR=${BACKUP_SOURCE_DIR}
 # Backup schedule (configurable via BACKUP_SCHEDULE)
 ${BACKUP_SCHEDULE} /src/backup.sh >> /var/log/backup.log 2>&1
 # Restore check schedule (configurable via RESTORE_CHECK_SCHEDULE)
-${RESTORE_CHECK_SCHEDULE} [ -z "\$(ls -A ${BACKUP_SOURCE_DIR})" ] && /src/restore.sh >> /var/log/restore.log 2>&1
+${RESTORE_CHECK_SCHEDULE} [ -z "\$(ls -A \$BACKUP_SOURCE_DIR)" ] && /src/restore.sh >> /var/log/restore.log 2>&1
 EOF
 
     # Install the crontab directly to the spool directory
@@ -123,7 +124,7 @@ EOF
         
         # Start crond as root (it will run jobs as the specified users)
         echo "Starting crond as root daemon..."
-        exec crond -f -d 8
+        exec crond -f -L /var/log/crond.log
     else
         # Show current user's crontab
         crontab -l 2>/dev/null || echo "Crontab installed successfully"
