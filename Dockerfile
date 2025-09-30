@@ -33,8 +33,5 @@ RUN mkdir -p /var/log && \
 COPY src/healthcheck.sh /src/healthcheck.sh
 RUN chmod +x /src/healthcheck.sh
 
-# Switch to backup user by default
-USER backup
-
-# Set the entrypoint
+# Set the entrypoint (start as root, will switch to backup user internally)
 ENTRYPOINT ["/src/entrypoint.sh"]

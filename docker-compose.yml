@@ -1,9 +1,12 @@
+version: '3.8'
+
 services:
-  docker-b2-backup:
+  backup:
     build:
       context: https://github.com/dynacylabs/docker-b2-backup.git
       dockerfile: Dockerfile
     container_name: docker-b2-backup
+    user: "0:0"
     volumes:
       - ./data:/mnt/backup
     env_file:

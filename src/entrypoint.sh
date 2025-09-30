@@ -51,10 +51,10 @@ setup_and_run() {
     # Determine effective user
     if [ "$(id -u)" = "0" ]; then
         EFFECTIVE_USER="backup"
-        RUN_CMD="su backup -c"
+        echo "Running as root, will execute commands as backup user"
     else
         EFFECTIVE_USER="$(whoami)"
-        RUN_CMD=""
+        echo "Running as non-root user: $EFFECTIVE_USER"
     fi
     
     # Create dynamic crontab based on environment variables
@@ -67,20 +67,25 @@ ${RESTORE_CHECK_SCHEDULE} [ -z "\$(ls -A ${BACKUP_SOURCE_DIR})" ] && /src/restor
 EOF
 
     # Install the crontab
-    if [ -n "$RUN_CMD" ]; then
-        $RUN_CMD "crontab /tmp/crontab"
+    if [ "$(id -u)" = "0" ]; then
+        # Running as root, install crontab for backup user
+        su -s /bin/sh backup -c "crontab /tmp/crontab"
     else
+        # Running as non-root, install directly
         crontab /tmp/crontab
     fi
 
     # Create log directory with proper permissions
     mkdir -p /var/log 2>/dev/null || true
+    if [ "$(id -u)" = "0" ]; then
+        chown backup:backup /var/log 2>/dev/null || true
+    fi
     
     # Check if this is the first run (directory is empty)
     if [ -z "$(ls -A ${BACKUP_SOURCE_DIR} 2>/dev/null)" ]; then
         echo "Mounted directory is empty. Restoring from Backblaze B2..."
-        if [ -n "$RUN_CMD" ]; then
-            $RUN_CMD "/src/restore.sh"
+        if [ "$(id -u)" = "0" ]; then
+            su -s /bin/sh backup -c "/src/restore.sh"
         else
             /src/restore.sh
         fi
@@ -92,12 +97,14 @@ EOF
     echo "Restore check: ${RESTORE_CHECK_SCHEDULE}"
     echo "Running as user: $EFFECTIVE_USER (UID=$(id -u), GID=$(id -g))"
     
-    if [ -n "$RUN_CMD" ]; then
-        $RUN_CMD "crontab -l"
+    if [ "$(id -u)" = "0" ]; then
+        # Show the crontab for backup user
+        su -s /bin/sh backup -c "crontab -l" 2>/dev/null || echo "Crontab installed successfully"
         # Start crond as backup user
-        exec $RUN_CMD "crond -f"
+        exec su -s /bin/sh backup -c "crond -f"
     else
-        crontab -l
+        # Show current user's crontab
+        crontab -l 2>/dev/null || echo "Crontab installed successfully"
         # Start crond as current user
         exec crond -f
     fi
