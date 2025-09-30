@@ -33,8 +33,32 @@ export RESTIC_PASSWORD
 if [ -z "$(ls -A $RESTORE_DIR)" ]; then
     echo "Restore directory is empty. Restoring the latest backup from Backblaze B2..."
     
-    # Restore the latest backup from Backblaze B2
-    restic restore latest --target $RESTORE_DIR
+    # Create a temporary restore directory
+    TEMP_RESTORE="/tmp/restore_temp"
+    mkdir -p "$TEMP_RESTORE"
+    
+    # Restore the latest backup to temporary directory
+    restic restore latest --target "$TEMP_RESTORE"
+    
+    # Check if restore created nested structure (old backups) or direct structure (new backups)
+    if [ -d "$TEMP_RESTORE/tmp/backup" ]; then
+        echo "Detected old backup format with nested directories. Moving files to correct location..."
+        # Move files from nested structure
+        mv "$TEMP_RESTORE/tmp/backup/"* "$RESTORE_DIR/" 2>/dev/null || true
+        mv "$TEMP_RESTORE/tmp/backup/".* "$RESTORE_DIR/" 2>/dev/null || true
+    elif [ -d "$TEMP_RESTORE$(basename $RESTORE_DIR)" ]; then
+        echo "Detected new backup format. Moving files to correct location..."
+        # Move files from backup directory structure
+        mv "$TEMP_RESTORE$(basename $RESTORE_DIR)/"* "$RESTORE_DIR/" 2>/dev/null || true
+        mv "$TEMP_RESTORE$(basename $RESTORE_DIR)/".* "$RESTORE_DIR/" 2>/dev/null || true
+    else
+        echo "Direct restore structure detected. Moving files..."
+        # Move everything from temp to restore directory
+        find "$TEMP_RESTORE" -mindepth 1 -maxdepth 1 -exec mv {} "$RESTORE_DIR/" \; 2>/dev/null || true
+    fi
+    
+    # Clean up temporary directory
+    rm -rf "$TEMP_RESTORE"
     
     echo "Restore completed."
 else

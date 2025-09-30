@@ -33,12 +33,6 @@ if [ -z "$(ls -A $MOUNTED_DIR)" ]; then
 else
     echo "Starting backup process..."
     
-    # Create a temporary directory
-    mkdir -p $TEMP_DIR
-
-    # Use rsync to copy files to the temporary directory
-    rsync -a --delete $MOUNTED_DIR/ $TEMP_DIR/
-
     # Set the Restic environment variables
     export RESTIC_REPOSITORY
     export RESTIC_PASSWORD
@@ -46,8 +40,9 @@ else
     # Initialize the Restic repository if it doesn't exist
     restic init || true
 
-    # Backup the temporary directory to Backblaze B2
-    restic backup $TEMP_DIR
+    # Backup the mounted directory directly to Backblaze B2
+    # Use --tag to identify the backup source
+    restic backup "$MOUNTED_DIR" --tag "$(hostname)" --tag "backup-$(date +%Y%m%d)"
 
     # Clean up old snapshots based on retention policy
     KEEP_DAILY="${RESTIC_KEEP_DAILY:-7}"
@@ -57,9 +52,6 @@ else
 
     echo "Cleaning up old snapshots (keeping: ${KEEP_DAILY} daily, ${KEEP_WEEKLY} weekly, ${KEEP_MONTHLY} monthly, ${KEEP_YEARLY} yearly)..."
     restic forget --keep-daily $KEEP_DAILY --keep-weekly $KEEP_WEEKLY --keep-monthly $KEEP_MONTHLY --keep-yearly $KEEP_YEARLY --prune
-
-    # Cleanup temporary directory
-    rm -rf $TEMP_DIR
 
     echo "Backup completed successfully."
 fi
