@@ -11,7 +11,7 @@ services:
     entrypoint: ["/bin/sh", "/src/entrypoint.sh"]
     restart: unless-stopped
     healthcheck:
-      test: ["/src/healthcheck.sh"]
+      test: ["CMD", "/src/healthcheck.sh"]
       interval: 60s
       timeout: 30s
       retries: 3

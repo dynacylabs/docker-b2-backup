@@ -33,10 +33,6 @@ RUN mkdir -p /var/log && \
 COPY src/healthcheck.sh /src/healthcheck.sh
 RUN chmod +x /src/healthcheck.sh
 
-# Healthcheck to ensure the container is working properly
-HEALTHCHECK --interval=60s --timeout=30s --start-period=30s --retries=3 \
-    CMD /src/healthcheck.sh
-
 # Switch to backup user by default
 USER backup
 
