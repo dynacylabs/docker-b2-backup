@@ -58,25 +58,36 @@ setup_and_run() {
     fi
     
     # Create dynamic crontab based on environment variables
-    cat > /tmp/crontab << EOF
+    CRON_FILE="/var/spool/cron/crontabs/backup"
+    
+    # Ensure cron directories exist
+    mkdir -p /var/spool/cron/crontabs /var/log
+    chmod 755 /var/spool/cron/crontabs
+    
+    # Create crontab content
+    cat > /tmp/crontab.tmp << EOF
 SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # Backup schedule (configurable via BACKUP_SCHEDULE)
 ${BACKUP_SCHEDULE} /src/backup.sh >> /var/log/backup.log 2>&1
 # Restore check schedule (configurable via RESTORE_CHECK_SCHEDULE)
 ${RESTORE_CHECK_SCHEDULE} [ -z "\$(ls -A ${BACKUP_SOURCE_DIR})" ] && /src/restore.sh >> /var/log/restore.log 2>&1
 EOF
 
-    # Install the crontab
+    # Install the crontab directly to the spool directory
     if [ "$(id -u)" = "0" ]; then
-        # Running as root, install crontab for backup user
         echo "Installing crontab for backup user..."
-        su backup -c "/usr/bin/crontab /tmp/crontab" 2>/dev/null || \
-        su backup -c "crontab /tmp/crontab" 2>/dev/null || \
-        (chown backup:backup /tmp/crontab && su backup -c "crontab /tmp/crontab")
+        cp /tmp/crontab.tmp "$CRON_FILE"
+        chown backup:backup "$CRON_FILE"
+        chmod 600 "$CRON_FILE"
+        echo "Crontab installed directly to $CRON_FILE"
     else
-        # Running as non-root, install directly
-        /usr/bin/crontab /tmp/crontab 2>/dev/null || crontab /tmp/crontab
+        # Running as non-root, try standard crontab command
+        crontab /tmp/crontab.tmp 2>/dev/null || echo "Failed to install crontab"
     fi
+    
+    # Clean up temp file
+    rm -f /tmp/crontab.tmp
 
     # Create log directory with proper permissions
     mkdir -p /var/log 2>/dev/null || true
@@ -103,21 +114,21 @@ EOF
     if [ "$(id -u)" = "0" ]; then
         # Show the crontab for backup user
         echo "Checking crontab installation..."
-        su backup -c "/usr/bin/crontab -l" 2>/dev/null || \
-        su backup -c "crontab -l" 2>/dev/null || \
-        echo "Crontab installed successfully"
+        if [ -f "/var/spool/cron/crontabs/backup" ]; then
+            echo "✅ Crontab file exists for backup user"
+            cat /var/spool/cron/crontabs/backup
+        else
+            echo "❌ Crontab file not found"
+        fi
         
-        # Start crond as backup user
-        echo "Starting crond as backup user..."
-        exec su backup -c "/usr/sbin/crond -f" 2>/dev/null || \
-        exec su backup -c "crond -f" 2>/dev/null || \
-        exec /usr/sbin/crond -f 2>/dev/null || \
-        exec crond -f
+        # Start crond as root (it will run jobs as the specified users)
+        echo "Starting crond as root daemon..."
+        exec crond -f -d 8
     else
         # Show current user's crontab
-        /usr/bin/crontab -l 2>/dev/null || crontab -l 2>/dev/null || echo "Crontab installed successfully"
+        crontab -l 2>/dev/null || echo "Crontab installed successfully"
         # Start crond as current user
-        exec /usr/sbin/crond -f 2>/dev/null || exec crond -f
+        exec crond -f
     fi
 }
 
