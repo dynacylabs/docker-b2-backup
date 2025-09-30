@@ -69,10 +69,13 @@ EOF
     # Install the crontab
     if [ "$(id -u)" = "0" ]; then
         # Running as root, install crontab for backup user
-        su -s /bin/sh backup -c "crontab /tmp/crontab"
+        echo "Installing crontab for backup user..."
+        su backup -c "/usr/bin/crontab /tmp/crontab" 2>/dev/null || \
+        su backup -c "crontab /tmp/crontab" 2>/dev/null || \
+        (chown backup:backup /tmp/crontab && su backup -c "crontab /tmp/crontab")
     else
         # Running as non-root, install directly
-        crontab /tmp/crontab
+        /usr/bin/crontab /tmp/crontab 2>/dev/null || crontab /tmp/crontab
     fi
 
     # Create log directory with proper permissions
@@ -85,7 +88,7 @@ EOF
     if [ -z "$(ls -A ${BACKUP_SOURCE_DIR} 2>/dev/null)" ]; then
         echo "Mounted directory is empty. Restoring from Backblaze B2..."
         if [ "$(id -u)" = "0" ]; then
-            su -s /bin/sh backup -c "/src/restore.sh"
+            su backup -c "/src/restore.sh" 2>/dev/null || /src/restore.sh
         else
             /src/restore.sh
         fi
@@ -99,14 +102,22 @@ EOF
     
     if [ "$(id -u)" = "0" ]; then
         # Show the crontab for backup user
-        su -s /bin/sh backup -c "crontab -l" 2>/dev/null || echo "Crontab installed successfully"
+        echo "Checking crontab installation..."
+        su backup -c "/usr/bin/crontab -l" 2>/dev/null || \
+        su backup -c "crontab -l" 2>/dev/null || \
+        echo "Crontab installed successfully"
+        
         # Start crond as backup user
-        exec su -s /bin/sh backup -c "crond -f"
+        echo "Starting crond as backup user..."
+        exec su backup -c "/usr/sbin/crond -f" 2>/dev/null || \
+        exec su backup -c "crond -f" 2>/dev/null || \
+        exec /usr/sbin/crond -f 2>/dev/null || \
+        exec crond -f
     else
         # Show current user's crontab
-        crontab -l 2>/dev/null || echo "Crontab installed successfully"
+        /usr/bin/crontab -l 2>/dev/null || crontab -l 2>/dev/null || echo "Crontab installed successfully"
         # Start crond as current user
-        exec crond -f
+        exec /usr/sbin/crond -f 2>/dev/null || exec crond -f
     fi
 }
 
