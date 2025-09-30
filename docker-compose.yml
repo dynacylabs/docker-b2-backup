@@ -9,7 +9,7 @@ services:
     user: "0:0"
     init: true  # Fix setpgid issues
     volumes:
-      - ./data:/mnt/backup
+      - ./data:/backup
     env_file:
       - .env
     entrypoint: ["/bin/sh", "/src/entrypoint.sh"]

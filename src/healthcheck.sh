@@ -4,7 +4,7 @@
 # This script verifies that the container is healthy and backups are working correctly
 
 # Set up environment variables
-BACKUP_SOURCE_DIR="${BACKUP_SOURCE_DIR:-/mnt/backup}"
+BACKUP_SOURCE_DIR="${BACKUP_SOURCE_DIR:-/backup}"
 export RESTIC_REPOSITORY="${RESTIC_REPOSITORY}"
 export RESTIC_PASSWORD="${RESTIC_PASSWORD}"
 export B2_ACCOUNT_ID="${B2_ACCOUNT_ID}"

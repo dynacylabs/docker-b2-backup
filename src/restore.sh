@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Define variables from environment with defaults
-RESTORE_DIR="${BACKUP_SOURCE_DIR:-/mnt/backup}"
+RESTORE_DIR="${BACKUP_SOURCE_DIR:-/backup}"
 RESTIC_REPOSITORY="${RESTIC_REPOSITORY}"
 RESTIC_PASSWORD="${RESTIC_PASSWORD}"
 

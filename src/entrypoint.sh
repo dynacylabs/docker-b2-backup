@@ -37,7 +37,7 @@ if [ "$PUID" != "1000" ] || [ "$PGID" != "1000" ]; then
 fi
 
 # Ensure backup source directory has correct permissions
-BACKUP_SOURCE_DIR="${BACKUP_SOURCE_DIR:-/mnt/backup}"
+BACKUP_SOURCE_DIR="${BACKUP_SOURCE_DIR:-/backup}"
 if [ -d "$BACKUP_SOURCE_DIR" ]; then
     chown backup:backup "$BACKUP_SOURCE_DIR" 2>/dev/null || true
 fi
@@ -45,6 +45,11 @@ fi
 # Default cron schedules
 BACKUP_SCHEDULE="${BACKUP_SCHEDULE:-0 2 * * *}"
 RESTORE_CHECK_SCHEDULE="${RESTORE_CHECK_SCHEDULE:-0 1 * * *}"
+
+echo "🔍 Debug: Environment variables:"
+echo "BACKUP_SOURCE_DIR: ${BACKUP_SOURCE_DIR}"
+echo "BACKUP_SCHEDULE: ${BACKUP_SCHEDULE}"
+echo "RESTORE_CHECK_SCHEDULE: ${RESTORE_CHECK_SCHEDULE}"
 
 # Function to setup and run as backup user
 setup_and_run() {
@@ -124,7 +129,23 @@ EOF
         
         # Start crond as root (it will run jobs as the specified users)
         echo "Starting crond as root daemon..."
-        exec crond -f -L /var/log/crond.log
+        
+        # Try different approaches to start crond
+        if crond -f -L /var/log/crond.log 2>/dev/null; then
+            echo "✅ crond started successfully with log file"
+        elif crond -f 2>/dev/null; then
+            echo "✅ crond started successfully without log file"
+        elif crond -L /var/log/crond.log && sleep infinity; then
+            echo "✅ crond started in background, keeping container alive"
+        elif crond && sleep infinity; then
+            echo "✅ crond started in background (basic), keeping container alive"
+        else
+            echo "❌ Failed to start crond, falling back to sleep loop"
+            while true; do
+                echo "Container running but crond failed - check configuration"
+                sleep 3600
+            done
+        fi
     else
         # Show current user's crontab
         crontab -l 2>/dev/null || echo "Crontab installed successfully"
