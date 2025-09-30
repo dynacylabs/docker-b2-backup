@@ -1,0 +1,5 @@
+SHELL=/bin/sh
+# Backup every day at 2 AM
+0 2 * * * /usr/local/bin/backup.sh >> /var/log/backup.log 2>&1
+# Restore every day at 1 AM if the directory is empty
+0 1 * * * [ -z "$(ls -A /path/to/mounted/directory)" ] && /usr/local/bin/restore.sh >> /var/log/restore.log 2>&1
