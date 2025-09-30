@@ -1,9 +1,7 @@
-version: '3.8'
-
 services:
   backup:
     build:
-      context: .
+      context: https://github.com/dynacylabs/docker-b2-backup.git
       dockerfile: Dockerfile
     volumes:
       - ./data:/mnt/backup
@@ -16,16 +14,4 @@ services:
       interval: 60s
       timeout: 30s
       retries: 3
-      start_period: 30s'
-
-services:
-  backup:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    volumes:
-      - ./data:/mnt/backup
-    env_file:
-      - exampenv.env
-    entrypoint: ["/bin/sh", "/src/entrypoint.sh"]
-    restart: unless-stopped
+      start_period: 30s
