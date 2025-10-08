@@ -36,9 +36,9 @@ fi
 # Always do basic checks (no B2 calls)
 log "Performing basic healthcheck..."
 
-# Check if cron daemon is running
-if ! pgrep crond > /dev/null; then
-    log "UNHEALTHY: crond is not running"
+# Check if scheduler process is running
+if ! pgrep -f "scheduler.sh" > /dev/null; then
+    log "UNHEALTHY: scheduler is not running"
     exit 1
 fi
 
@@ -60,10 +60,9 @@ if [ ! -d "$BACKUP_SOURCE_DIR" ]; then
     exit 1
 fi
 
-# Check if crontab is installed
-if ! crontab -l > /dev/null 2>&1; then
-    log "UNHEALTHY: Crontab is not configured"
-    exit 1
+# Check if scheduler log exists (indicates scheduler has started)
+if [ ! -f "/var/log/scheduler.log" ]; then
+    log "WARNING: Scheduler log not found yet"
 fi
 
 # Check disk space in backup source directory
