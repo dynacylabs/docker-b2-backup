@@ -65,6 +65,107 @@ if [ ! -f "/var/log/scheduler.log" ]; then
     log "WARNING: Scheduler log not found yet"
 fi
 
+# Check for backup/restore status markers (written by backup.sh and restore.sh)
+if [ -f "/tmp/backup_status" ]; then
+    # Read status file
+    STATUS=$(head -1 /tmp/backup_status 2>/dev/null)
+    if [ "$STATUS" = "FAILED" ]; then
+        TIMESTAMP=$(sed -n '2p' /tmp/backup_status 2>/dev/null || echo "0")
+        REASON=$(sed -n '3p' /tmp/backup_status 2>/dev/null || echo "Unknown")
+        CURRENT_TIME=$(date +%s)
+        HOURS_AGO=$(( (CURRENT_TIME - TIMESTAMP) / 3600 ))
+        
+        if [ "$HOURS_AGO" -lt 24 ]; then
+            log "UNHEALTHY: Backup failed ${HOURS_AGO}h ago - Reason: $REASON"
+            exit 1
+        else
+            log "WARNING: Old backup failure detected (${HOURS_AGO}h ago)"
+        fi
+    fi
+fi
+
+if [ -f "/tmp/restore_status" ]; then
+    # Read status file
+    STATUS=$(head -1 /tmp/restore_status 2>/dev/null)
+    if [ "$STATUS" = "FAILED" ]; then
+        TIMESTAMP=$(sed -n '2p' /tmp/restore_status 2>/dev/null || echo "0")
+        REASON=$(sed -n '3p' /tmp/restore_status 2>/dev/null || echo "Unknown")
+        CURRENT_TIME=$(date +%s)
+        HOURS_AGO=$(( (CURRENT_TIME - TIMESTAMP) / 3600 ))
+        
+        if [ "$HOURS_AGO" -lt 24 ]; then
+            log "UNHEALTHY: Restore failed ${HOURS_AGO}h ago - Reason: $REASON"
+            exit 1
+        else
+            log "WARNING: Old restore failure detected (${HOURS_AGO}h ago)"
+        fi
+    fi
+fi
+
+# Check for recent backup/restore failures in logs
+FAILURE_CHECK_HOURS=24  # Check for failures in last 24 hours
+
+# Check backup.log for failures
+if [ -f "/var/log/backup.log" ]; then
+    # Look for failure indicators in the last 100 lines
+    if tail -100 /var/log/backup.log 2>/dev/null | grep -qi "error\|failed\|fatal\|cannot\|unable to"; then
+        # Get the timestamp of the last error
+        LAST_ERROR=$(tail -100 /var/log/backup.log | grep -i "error\|failed\|fatal" | tail -1)
+        log "WARNING: Recent backup errors detected: $LAST_ERROR"
+        
+        # Check if this is recent (within last 24 hours)
+        BACKUP_LOG_MTIME=$(stat -c %Y /var/log/backup.log 2>/dev/null || echo "0")
+        CURRENT_TIME=$(date +%s)
+        HOURS_SINCE_BACKUP_LOG=$(( (CURRENT_TIME - BACKUP_LOG_MTIME) / 3600 ))
+        
+        if [ "$HOURS_SINCE_BACKUP_LOG" -lt "$FAILURE_CHECK_HOURS" ]; then
+            log "UNHEALTHY: Recent backup failure detected (within last ${FAILURE_CHECK_HOURS}h)"
+            exit 1
+        fi
+    fi
+fi
+
+# Check restore.log for failures
+if [ -f "/var/log/restore.log" ]; then
+    # Look for failure indicators
+    if tail -100 /var/log/restore.log 2>/dev/null | grep -qi "error\|failed\|fatal\|cannot\|unable to"; then
+        LAST_ERROR=$(tail -100 /var/log/restore.log | grep -i "error\|failed\|fatal" | tail -1)
+        log "WARNING: Recent restore errors detected: $LAST_ERROR"
+        
+        # Check if this is recent
+        RESTORE_LOG_MTIME=$(stat -c %Y /var/log/restore.log 2>/dev/null || echo "0")
+        CURRENT_TIME=$(date +%s)
+        HOURS_SINCE_RESTORE_LOG=$(( (CURRENT_TIME - RESTORE_LOG_MTIME) / 3600 ))
+        
+        if [ "$HOURS_SINCE_RESTORE_LOG" -lt "$FAILURE_CHECK_HOURS" ]; then
+            log "UNHEALTHY: Recent restore failure detected (within last ${FAILURE_CHECK_HOURS}h)"
+            exit 1
+        fi
+    fi
+fi
+
+# Check scheduler.log for repeated failures
+if [ -f "/var/log/scheduler.log" ]; then
+    # Count recent failures (last 50 lines)
+    RECENT_FAILURES=$(tail -50 /var/log/scheduler.log 2>/dev/null | grep -c "❌.*failed" || echo "0")
+    
+    if [ "$RECENT_FAILURES" -gt 3 ]; then
+        log "UNHEALTHY: Multiple recent failures detected in scheduler ($RECENT_FAILURES failures)"
+        exit 1
+    fi
+fi
+
+# Check for successful backups
+if [ -f "/tmp/last_backup_success" ]; then
+    LAST_SUCCESS=$(cat /tmp/last_backup_success 2>/dev/null || echo "0")
+    CURRENT_TIME=$(date +%s)
+    HOURS_SINCE_SUCCESS=$(( (CURRENT_TIME - LAST_SUCCESS) / 3600 ))
+    
+    if [ "$HOURS_SINCE_SUCCESS" -gt 48 ]; then
+        log "WARNING: Last successful backup was ${HOURS_SINCE_SUCCESS}h ago"
+    fi
+fi
+
 # Check disk space in backup source directory
 DISK_USAGE=$(df "$BACKUP_SOURCE_DIR" | awk 'NR==2 {print $5}' | sed 's/%//')
 if [ "$DISK_USAGE" -gt 95 ]; then
