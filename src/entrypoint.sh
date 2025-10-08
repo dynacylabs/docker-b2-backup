@@ -69,15 +69,30 @@ setup_and_run() {
     mkdir -p /var/spool/cron/crontabs /var/log
     chmod 755 /var/spool/cron/crontabs
     
+    # Export all environment variables to a file that cron can source
+    echo "Creating environment file for cron jobs..."
+    cat > /etc/environment << EOF
+export RESTIC_REPOSITORY="${RESTIC_REPOSITORY}"
+export RESTIC_PASSWORD="${RESTIC_PASSWORD}"
+export B2_ACCOUNT_ID="${B2_ACCOUNT_ID}"
+export B2_ACCOUNT_KEY="${B2_ACCOUNT_KEY}"
+export BACKUP_SOURCE_DIR="${BACKUP_SOURCE_DIR}"
+export BACKUP_TEMP_DIR="${BACKUP_TEMP_DIR:-/tmp/backup}"
+export RESTIC_KEEP_DAILY="${RESTIC_KEEP_DAILY:-7}"
+export RESTIC_KEEP_WEEKLY="${RESTIC_KEEP_WEEKLY:-4}"
+export RESTIC_KEEP_MONTHLY="${RESTIC_KEEP_MONTHLY:-6}"
+export RESTIC_KEEP_YEARLY="${RESTIC_KEEP_YEARLY:-2}"
+EOF
+    chmod 644 /etc/environment
+    
     # Create crontab content
     cat > /tmp/crontab.tmp << EOF
-SHELL=/bin/sh
+SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-BACKUP_SOURCE_DIR=${BACKUP_SOURCE_DIR}
 # Backup schedule (configurable via BACKUP_SCHEDULE)
-${BACKUP_SCHEDULE} /src/backup.sh >> /var/log/backup.log 2>&1
+${BACKUP_SCHEDULE} . /etc/environment && /src/backup.sh >> /var/log/backup.log 2>&1
 # Restore check schedule (configurable via RESTORE_CHECK_SCHEDULE)
-${RESTORE_CHECK_SCHEDULE} [ -z "\$(ls -A \$BACKUP_SOURCE_DIR)" ] && /src/restore.sh >> /var/log/restore.log 2>&1
+${RESTORE_CHECK_SCHEDULE} . /etc/environment && [ -z "\$(ls -A ${BACKUP_SOURCE_DIR})" ] && /src/restore.sh >> /var/log/restore.log 2>&1
 EOF
 
     # Install the crontab directly to the spool directory
@@ -97,8 +112,10 @@ EOF
 
     # Create log directory with proper permissions
     mkdir -p /var/log 2>/dev/null || true
+    touch /var/log/backup.log /var/log/restore.log /var/log/crond.log 2>/dev/null || true
     if [ "$(id -u)" = "0" ]; then
-        chown backup:backup /var/log 2>/dev/null || true
+        chown backup:backup /var/log /var/log/backup.log /var/log/restore.log /var/log/crond.log 2>/dev/null || true
+        chmod 666 /var/log/backup.log /var/log/restore.log /var/log/crond.log 2>/dev/null || true
     fi
     
     # Check if this is the first run (directory is empty)
@@ -130,27 +147,20 @@ EOF
         # Start crond as root (it will run jobs as the specified users)
         echo "Starting crond as root daemon..."
         
-        # Try different approaches to start crond
-        if crond -f -L /var/log/crond.log 2>/dev/null; then
-            echo "✅ crond started successfully with log file"
-        elif crond -f 2>/dev/null; then
-            echo "✅ crond started successfully without log file"
-        elif crond -L /var/log/crond.log && sleep infinity; then
-            echo "✅ crond started in background, keeping container alive"
-        elif crond && sleep infinity; then
-            echo "✅ crond started in background (basic), keeping container alive"
-        else
-            echo "❌ Failed to start crond, falling back to sleep loop"
-            while true; do
-                echo "Container running but crond failed - check configuration"
-                sleep 3600
-            done
-        fi
+        # Alpine's dcron needs specific flags:
+        # -f: foreground mode
+        # -d: debug level (8 is verbose, can be reduced to 0-7)
+        # -l: log level
+        # -L: log file
+        
+        # Start crond in foreground with logging
+        exec crond -f -d 8 -L /var/log/crond.log
     else
         # Show current user's crontab
+        echo "Current user's crontab:"
         crontab -l 2>/dev/null || echo "Crontab installed successfully"
-        # Start crond as current user
-        exec crond -f
+        # Start crond as current user in foreground
+        exec crond -f -d 8
     fi
 }
 
