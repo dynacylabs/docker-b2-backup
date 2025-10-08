@@ -147,20 +147,42 @@ EOF
         # Start crond as root (it will run jobs as the specified users)
         echo "Starting crond as root daemon..."
         
-        # Alpine's dcron needs specific flags:
-        # -f: foreground mode
-        # -d: debug level (8 is verbose, can be reduced to 0-7)
-        # -l: log level
-        # -L: log file
+        # Alpine's dcron startup:
+        # Start crond in background first, then keep container alive
+        # The -L flag enables logging
+        crond -b -L /var/log/crond.log
         
-        # Start crond in foreground with logging
-        exec crond -f -d 8 -L /var/log/crond.log
+        # Verify crond started
+        sleep 2
+        if pgrep crond > /dev/null; then
+            echo "✅ crond started successfully (PID: $(pgrep crond))"
+        else
+            echo "❌ Failed to start crond"
+            exit 1
+        fi
+        
+        # Keep container alive and tail logs
+        echo "Container is running. Tailing cron logs..."
+        tail -f /var/log/crond.log /var/log/backup.log /var/log/restore.log 2>/dev/null || sleep infinity
     else
         # Show current user's crontab
         echo "Current user's crontab:"
         crontab -l 2>/dev/null || echo "Crontab installed successfully"
-        # Start crond as current user in foreground
-        exec crond -f -d 8
+        # Start crond as current user in background
+        crond -b
+        
+        # Verify crond started
+        sleep 2
+        if pgrep crond > /dev/null; then
+            echo "✅ crond started successfully (PID: $(pgrep crond))"
+        else
+            echo "❌ Failed to start crond"
+            exit 1
+        fi
+        
+        # Keep container alive
+        echo "Container is running. Keeping alive..."
+        tail -f /var/log/backup.log /var/log/restore.log 2>/dev/null || sleep infinity
     fi
 }
 
