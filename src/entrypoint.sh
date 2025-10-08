@@ -101,16 +101,13 @@ EOF
     if [ "$(id -u)" = "0" ]; then
         echo "Installing crontab for backup user..."
         
-        # For Alpine's dcron, use the crontab command as the user
-        # This properly registers the crontab with dcron
-        su backup -c "crontab /tmp/crontab.tmp"
+        # Alpine's crontab binary often has restrictive permissions
+        # Install directly to the crontab directory
+        cp /tmp/crontab.tmp "$CRON_FILE"
+        chown backup:backup "$CRON_FILE"
+        chmod 600 "$CRON_FILE"
         
-        if [ $? -eq 0 ]; then
-            echo "Crontab installed successfully for backup user"
-        else
-            echo "Failed to install crontab via crontab command"
-            exit 1
-        fi
+        echo "Crontab installed successfully for backup user"
     else
         # Running as non-root, use standard crontab command
         crontab /tmp/crontab.tmp 2>/dev/null || echo "Failed to install crontab"
@@ -146,11 +143,11 @@ EOF
     if [ "$(id -u)" = "0" ]; then
         # Show the crontab for backup user
         echo "Checking crontab installation..."
-        if su backup -c "crontab -l" > /dev/null 2>&1; then
+        if [ -f "/var/spool/cron/crontabs/backup" ]; then
             echo "✅ Crontab installed for backup user:"
-            su backup -c "crontab -l"
+            cat /var/spool/cron/crontabs/backup
         else
-            echo "❌ Crontab not found for backup user"
+            echo "❌ Crontab file not found"
         fi
         
         # Start crond as root (it will run jobs as the specified users)

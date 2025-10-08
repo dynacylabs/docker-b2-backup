@@ -14,6 +14,12 @@ RUN apk add --no-cache \
 RUN addgroup -g 1000 backup && \
     adduser -u 1000 -G backup -s /bin/bash -D backup
 
+# Create necessary directories with proper permissions for dcron
+RUN mkdir -p /var/spool/cron/crontabs /var/log && \
+    chmod 755 /var/spool/cron/crontabs && \
+    chown -R root:root /var/spool/cron && \
+    chmod 4755 /usr/bin/crontab || true
+
 # Set the working directory
 WORKDIR /app
 
@@ -26,8 +32,7 @@ COPY src/entrypoint.sh /src/entrypoint.sh
 RUN chmod +x /src/backup.sh /src/restore.sh /src/entrypoint.sh
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /var/log && \
-    chown -R backup:backup /var/log /src
+RUN chown -R backup:backup /var/log /src
 
 # Add healthcheck script
 COPY src/healthcheck.sh /src/healthcheck.sh
