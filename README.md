@@ -570,4 +570,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [Restic](https://restic.net/) - Fast, secure backup program
 - [Backblaze B2](https://www.backblaze.com/b2/) - Affordable cloud storage
 - [Alpine Linux](https://alpinelinux.org/) - Lightweight container base
-
