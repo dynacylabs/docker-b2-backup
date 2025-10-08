@@ -86,6 +86,8 @@ EOF
     chmod 644 /etc/environment
     
     # Create crontab content
+    # Note: When using 'crontab' command, DON'T include username
+    # When writing to system crontab directly, include username
     cat > /tmp/crontab.tmp << EOF
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
@@ -95,15 +97,22 @@ ${BACKUP_SCHEDULE} . /etc/environment && /src/backup.sh >> /var/log/backup.log 2
 ${RESTORE_CHECK_SCHEDULE} . /etc/environment && [ -z "\$(ls -A ${BACKUP_SOURCE_DIR})" ] && /src/restore.sh >> /var/log/restore.log 2>&1
 EOF
 
-    # Install the crontab directly to the spool directory
+    # Install the crontab
     if [ "$(id -u)" = "0" ]; then
         echo "Installing crontab for backup user..."
-        cp /tmp/crontab.tmp "$CRON_FILE"
-        chown backup:backup "$CRON_FILE"
-        chmod 600 "$CRON_FILE"
-        echo "Crontab installed directly to $CRON_FILE"
+        
+        # For Alpine's dcron, use the crontab command as the user
+        # This properly registers the crontab with dcron
+        su backup -c "crontab /tmp/crontab.tmp"
+        
+        if [ $? -eq 0 ]; then
+            echo "Crontab installed successfully for backup user"
+        else
+            echo "Failed to install crontab via crontab command"
+            exit 1
+        fi
     else
-        # Running as non-root, try standard crontab command
+        # Running as non-root, use standard crontab command
         crontab /tmp/crontab.tmp 2>/dev/null || echo "Failed to install crontab"
     fi
     
@@ -137,20 +146,21 @@ EOF
     if [ "$(id -u)" = "0" ]; then
         # Show the crontab for backup user
         echo "Checking crontab installation..."
-        if [ -f "/var/spool/cron/crontabs/backup" ]; then
-            echo "✅ Crontab file exists for backup user"
-            cat /var/spool/cron/crontabs/backup
+        if su backup -c "crontab -l" > /dev/null 2>&1; then
+            echo "✅ Crontab installed for backup user:"
+            su backup -c "crontab -l"
         else
-            echo "❌ Crontab file not found"
+            echo "❌ Crontab not found for backup user"
         fi
         
         # Start crond as root (it will run jobs as the specified users)
         echo "Starting crond as root daemon..."
         
-        # Alpine's dcron startup:
-        # Start crond in background first, then keep container alive
-        # The -L flag enables logging
-        crond -b -L /var/log/crond.log
+        # Alpine's dcron startup with verbose logging:
+        # -b: run in background
+        # -l 2: log level 2 (more verbose: 0=errors, 8=debug everything)
+        # -L: log file location
+        crond -b -l 2 -L /var/log/crond.log
         
         # Verify crond started
         sleep 2
