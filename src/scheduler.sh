@@ -136,10 +136,16 @@ check_cron_field() {
 # Run backup
 run_backup() {
     log "🔄 Starting scheduled backup..."
-    if /src/backup.sh >> /var/log/backup.log 2>&1; then
+    # Capture output to both log file and variable for error reporting
+    BACKUP_OUTPUT=$(/src/backup.sh 2>&1 | tee -a /var/log/backup.log)
+    BACKUP_EXIT_CODE=${PIPESTATUS[0]}
+    
+    if [ $BACKUP_EXIT_CODE -eq 0 ]; then
         log "✅ Backup completed successfully"
     else
         log "❌ Backup failed"
+        # Display the error output directly to console
+        echo "$BACKUP_OUTPUT" | grep -A 100 "^========================================$" || echo "$BACKUP_OUTPUT"
     fi
 }
 
@@ -147,10 +153,16 @@ run_backup() {
 run_restore_check() {
     if [ -z "$(ls -A ${BACKUP_SOURCE_DIR} 2>/dev/null)" ]; then
         log "🔄 Directory is empty, starting restore..."
-        if /src/restore.sh >> /var/log/restore.log 2>&1; then
+        # Capture output to both log file and variable for error reporting
+        RESTORE_OUTPUT=$(/src/restore.sh 2>&1 | tee -a /var/log/restore.log)
+        RESTORE_EXIT_CODE=${PIPESTATUS[0]}
+        
+        if [ $RESTORE_EXIT_CODE -eq 0 ]; then
             log "✅ Restore completed successfully"
         else
             log "❌ Restore failed"
+            # Display the error output directly to console
+            echo "$RESTORE_OUTPUT" | grep -A 100 "^========================================$" || echo "$RESTORE_OUTPUT"
         fi
     else
         log "ℹ️  Directory not empty, skipping restore check"
