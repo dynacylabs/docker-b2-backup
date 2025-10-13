@@ -59,9 +59,19 @@ if [ -z "$(ls -A $RESTORE_DIR)" ]; then
     mkdir -p "$TEMP_RESTORE"
     
     # Restore the latest backup to temporary directory
-    if ! restic restore latest --target "$TEMP_RESTORE"; then
-        echo "Error: Restore failed"
-        mark_failure "Restic restore command failed"
+    RESTORE_ERROR=$(restic restore latest --target "$TEMP_RESTORE" 2>&1)
+    RESTORE_EXIT_CODE=$?
+    if [ $RESTORE_EXIT_CODE -ne 0 ]; then
+        echo "========================================" >&2
+        echo "ERROR: Restore failed with exit code $RESTORE_EXIT_CODE" >&2
+        echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
+        echo "Target: $TEMP_RESTORE" >&2
+        echo "Repository: $RESTIC_REPOSITORY" >&2
+        echo "----------------------------------------" >&2
+        echo "Error details:" >&2
+        echo "$RESTORE_ERROR" >&2
+        echo "========================================" >&2
+        mark_failure "Restic restore command failed with exit code $RESTORE_EXIT_CODE"
         rm -rf "$TEMP_RESTORE"
         exit 1
     fi
@@ -88,7 +98,13 @@ if [ -z "$(ls -A $RESTORE_DIR)" ]; then
     
     # Verify restore succeeded (directory should not be empty)
     if [ -z "$(ls -A $RESTORE_DIR)" ]; then
-        echo "Error: Restore completed but directory is still empty"
+        echo "========================================" >&2
+        echo "ERROR: Restore completed but directory is still empty" >&2
+        echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
+        echo "Target directory: $RESTORE_DIR" >&2
+        echo "Temp restore directory contents:" >&2
+        ls -la "$TEMP_RESTORE" 2>&1 || echo "Temp directory already cleaned up" >&2
+        echo "========================================" >&2
         mark_failure "Restore completed but no files were restored"
         exit 1
     fi

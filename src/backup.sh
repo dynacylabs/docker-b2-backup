@@ -63,9 +63,19 @@ else
 
     # Backup the mounted directory directly to Backblaze B2
     # Use --tag to identify the backup source
-    if ! restic backup "$MOUNTED_DIR" --tag "$(hostname)" --tag "backup-$(date +%Y%m%d)"; then
-        echo "Error: Backup failed"
-        mark_failure "Restic backup command failed"
+    BACKUP_ERROR=$(restic backup "$MOUNTED_DIR" --tag "$(hostname)" --tag "backup-$(date +%Y%m%d)" 2>&1)
+    BACKUP_EXIT_CODE=$?
+    if [ $BACKUP_EXIT_CODE -ne 0 ]; then
+        echo "========================================" >&2
+        echo "ERROR: Backup failed with exit code $BACKUP_EXIT_CODE" >&2
+        echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
+        echo "Source: $MOUNTED_DIR" >&2
+        echo "Repository: $RESTIC_REPOSITORY" >&2
+        echo "----------------------------------------" >&2
+        echo "Error details:" >&2
+        echo "$BACKUP_ERROR" >&2
+        echo "========================================" >&2
+        mark_failure "Restic backup command failed with exit code $BACKUP_EXIT_CODE"
         exit 1
     fi
 
@@ -76,8 +86,16 @@ else
     KEEP_YEARLY="${RESTIC_KEEP_YEARLY:-2}"
 
     echo "Cleaning up old snapshots (keeping: ${KEEP_DAILY} daily, ${KEEP_WEEKLY} weekly, ${KEEP_MONTHLY} monthly, ${KEEP_YEARLY} yearly)..."
-    if ! restic forget --keep-daily $KEEP_DAILY --keep-weekly $KEEP_WEEKLY --keep-monthly $KEEP_MONTHLY --keep-yearly $KEEP_YEARLY --prune; then
-        echo "Warning: Snapshot cleanup failed"
+    CLEANUP_ERROR=$(restic forget --keep-daily $KEEP_DAILY --keep-weekly $KEEP_WEEKLY --keep-monthly $KEEP_MONTHLY --keep-yearly $KEEP_YEARLY --prune 2>&1)
+    CLEANUP_EXIT_CODE=$?
+    if [ $CLEANUP_EXIT_CODE -ne 0 ]; then
+        echo "========================================" >&2
+        echo "WARNING: Snapshot cleanup failed with exit code $CLEANUP_EXIT_CODE" >&2
+        echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
+        echo "----------------------------------------" >&2
+        echo "Error details:" >&2
+        echo "$CLEANUP_ERROR" >&2
+        echo "========================================" >&2
         # Don't fail on cleanup errors, backup succeeded
     fi
 
