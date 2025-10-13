@@ -18,6 +18,55 @@ mark_success() {
     rm -f "$STATUS_FILE"  # Clear failure status
 }
 
+# Function to check if repository is locked
+check_and_unlock() {
+    echo "Checking for stale locks..."
+    local LOCKS_OUTPUT=$(restic list locks 2>&1)
+    local LOCKS_EXIT_CODE=$?
+    
+    if [ $LOCKS_EXIT_CODE -ne 0 ]; then
+        echo "Warning: Unable to check locks (this is normal if repository doesn't exist yet)"
+        return 0
+    fi
+    
+    # Check if there are any locks
+    if echo "$LOCKS_OUTPUT" | grep -q '^[a-f0-9]'; then
+        echo "Found existing locks. Attempting to unlock stale locks..."
+        local UNLOCK_OUTPUT=$(restic unlock 2>&1)
+        local UNLOCK_EXIT_CODE=$?
+        
+        if [ $UNLOCK_EXIT_CODE -eq 0 ]; then
+            echo "Successfully removed stale locks"
+        else
+            echo "Warning: Failed to unlock repository" >&2
+            echo "$UNLOCK_OUTPUT" >&2
+            return 1
+        fi
+    else
+        echo "No stale locks found"
+    fi
+    return 0
+}
+
+# Function to handle lock errors and retry
+handle_lock_error() {
+    local error_output="$1"
+    local command_name="$2"
+    
+    # Check if the error is lock-related
+    if echo "$error_output" | grep -qi "unable to create lock\|repository is already locked\|lock.*failed"; then
+        echo "========================================" >&2
+        echo "Lock error detected in $command_name" >&2
+        echo "Attempting to remove stale locks and retry..." >&2
+        echo "========================================" >&2
+        
+        # Try to unlock
+        restic unlock 2>&1
+        return 0  # Indicate this was a lock error
+    fi
+    return 1  # Not a lock error
+}
+
 # Define variables from environment with defaults
 RESTORE_DIR="${BACKUP_SOURCE_DIR:-/backup}"
 RESTIC_REPOSITORY="${RESTIC_REPOSITORY}"
@@ -46,11 +95,14 @@ if [ -z "$B2_ACCOUNT_ID" ] || [ -z "$B2_ACCOUNT_KEY" ]; then
     exit 1
 fi
 
-# Set the Restic environment variables
-export RESTIC_REPOSITORY
-export RESTIC_PASSWORD
+    # Set the Restic environment variables
+    export RESTIC_REPOSITORY
+    export RESTIC_PASSWORD
 
-# Check if the restore directory is empty
+    # Check for and remove stale locks before starting
+    check_and_unlock
+
+    # Check if the restore directory is empty
 if [ -z "$(ls -A $RESTORE_DIR)" ]; then
     echo "Restore directory is empty. Restoring the latest backup from Backblaze B2..."
     
@@ -62,18 +114,29 @@ if [ -z "$(ls -A $RESTORE_DIR)" ]; then
     RESTORE_ERROR=$(restic restore latest --target "$TEMP_RESTORE" 2>&1)
     RESTORE_EXIT_CODE=$?
     if [ $RESTORE_EXIT_CODE -ne 0 ]; then
-        echo "========================================" >&2
-        echo "ERROR: Restore failed with exit code $RESTORE_EXIT_CODE" >&2
-        echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
-        echo "Target: $TEMP_RESTORE" >&2
-        echo "Repository: $RESTIC_REPOSITORY" >&2
-        echo "----------------------------------------" >&2
-        echo "Error details:" >&2
-        echo "$RESTORE_ERROR" >&2
-        echo "========================================" >&2
-        mark_failure "Restic restore command failed with exit code $RESTORE_EXIT_CODE"
-        rm -rf "$TEMP_RESTORE"
-        exit 1
+        # Check if this is a lock error and retry once
+        if handle_lock_error "$RESTORE_ERROR" "restore"; then
+            echo "Retrying restore after lock removal..." >&2
+            RESTORE_ERROR=$(restic restore latest --target "$TEMP_RESTORE" 2>&1)
+            RESTORE_EXIT_CODE=$?
+        fi
+        
+        if [ $RESTORE_EXIT_CODE -ne 0 ]; then
+            echo "========================================" >&2
+            echo "ERROR: Restore failed with exit code $RESTORE_EXIT_CODE" >&2
+            echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
+            echo "Target: $TEMP_RESTORE" >&2
+            echo "Repository: $RESTIC_REPOSITORY" >&2
+            echo "----------------------------------------" >&2
+            echo "Error details:" >&2
+            echo "$RESTORE_ERROR" >&2
+            echo "========================================" >&2
+            mark_failure "Restic restore command failed with exit code $RESTORE_EXIT_CODE"
+            rm -rf "$TEMP_RESTORE"
+            exit 1
+        else
+            echo "Restore succeeded after retry"
+        fi
     fi
     
     # Check if restore created nested structure (old backups) or direct structure (new backups)
