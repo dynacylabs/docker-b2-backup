@@ -466,7 +466,35 @@ Default retention keeps:
 
 ## 🔧 Troubleshooting
 
+### 🆕 Improved Error Diagnostics
+
+This container now provides **intelligent error diagnosis** with specific troubleshooting steps. When backups or restores fail, you'll see:
+- Clear identification of the problem (authentication, network, disk space, etc.)
+- Specific remediation steps
+- Relevant commands to run
+- Full error details for advanced debugging
+
+See **[ERROR_GUIDE.md](ERROR_GUIDE.md)** for comprehensive error diagnosis and solutions.
+
+### Quick Diagnostics
+
+```bash
+# View recent errors with diagnosis
+docker logs docker-b2-backup --tail 50
+
+# Check container health status
+docker inspect docker-b2-backup --format='{{.State.Health.Status}}'
+
+# Manual health check (shows detailed status)
+docker exec docker-b2-backup /src/healthcheck.sh
+```
+
 ### Common Issues
+
+**Container never becomes healthy:**
+- **FIXED!** ✅ Health check now properly detects successful backups
+- Check status files: `docker exec docker-b2-backup cat /tmp/backup_status`
+- View last success: `docker exec docker-b2-backup cat /tmp/last_backup_success`
 
 **Permission denied on backup files:**
 ```bash
@@ -476,20 +504,21 @@ sudo chown -R $(id -u):$(id -g) ./data/
 
 **B2 authentication errors:**
 ```bash
+# The error will show specific diagnosis:
+# "DIAGNOSIS: Authentication failure"
+# with steps to check B2_ACCOUNT_ID and B2_ACCOUNT_KEY
+
 # Verify credentials in .env file
-# Check B2 account status and key permissions
+grep -E "B2_ACCOUNT_ID|B2_ACCOUNT_KEY" .env
+
+# Check B2 account status and key permissions in B2 console
 ```
 
-**Container health check failing:**
+**Network connectivity issues:**
 ```bash
-# Check logs for specific error
-docker-compose logs backup
-
-# Run manual health check
-docker-compose exec backup /src/healthcheck.sh
-
-# Check status markers
-docker-compose exec backup cat /tmp/backup_status
+# Diagnosis will identify network problems automatically
+# Test B2 connectivity from container:
+docker exec docker-b2-backup curl -I https://api.backblazeb2.com
 ```
 
 **Scheduler not running:**

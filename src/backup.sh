@@ -18,6 +18,73 @@ mark_success() {
     rm -f "$STATUS_FILE"  # Clear failure status
 }
 
+# Function to diagnose and report detailed errors
+diagnose_error() {
+    local error_output="$1"
+    local operation="$2"
+    local exit_code="$3"
+    
+    echo "========================================" >&2
+    echo "ERROR: $operation failed with exit code $exit_code" >&2
+    echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
+    echo "Repository: $RESTIC_REPOSITORY" >&2
+    echo "----------------------------------------" >&2
+    
+    # Analyze error output for specific issues
+    if echo "$error_output" | grep -qi "authentication\|401\|403\|invalid.*credentials\|access.*denied"; then
+        echo "DIAGNOSIS: Authentication failure" >&2
+        echo "  - Check B2_ACCOUNT_ID and B2_ACCOUNT_KEY are correct" >&2
+        echo "  - Verify the application key has proper permissions" >&2
+        echo "  - Check if the key has expired or been revoked" >&2
+    elif echo "$error_output" | grep -qi "connection.*refused\|connection.*timed out\|network.*unreachable\|no route to host\|temporary failure in name resolution"; then
+        echo "DIAGNOSIS: Network connectivity issue" >&2
+        echo "  - Check internet connection" >&2
+        echo "  - Verify firewall/proxy settings" >&2
+        echo "  - Check if B2 service is accessible" >&2
+        echo "  - Try: curl -I https://api.backblazeb2.com" >&2
+    elif echo "$error_output" | grep -qi "no space left on device\|disk.*full\|quota exceeded"; then
+        echo "DIAGNOSIS: Disk space issue" >&2
+        echo "  - Check available disk space: df -h" >&2
+        echo "  - Clean up old files or increase storage" >&2
+    elif echo "$error_output" | grep -qi "bucket.*not.*found\|repository does not exist\|404"; then
+        echo "DIAGNOSIS: Repository not found" >&2
+        echo "  - Check RESTIC_REPOSITORY is correct: $RESTIC_REPOSITORY" >&2
+        echo "  - Verify the B2 bucket exists" >&2
+        echo "  - Repository may need to be initialized first" >&2
+    elif echo "$error_output" | grep -qi "wrong password\|incorrect.*password\|cannot.*decrypt"; then
+        echo "DIAGNOSIS: Incorrect repository password" >&2
+        echo "  - Check RESTIC_PASSWORD is correct" >&2
+        echo "  - Ensure password hasn't changed since repo creation" >&2
+    elif echo "$error_output" | grep -qi "lock.*failed\|already locked\|unable to create lock"; then
+        echo "DIAGNOSIS: Repository lock issue" >&2
+        echo "  - Another backup may be running" >&2
+        echo "  - Stale lock from previous failed operation" >&2
+        echo "  - Manual unlock may be needed: restic unlock" >&2
+    elif echo "$error_output" | grep -qi "permission denied\|access is denied"; then
+        echo "DIAGNOSIS: File permission issue" >&2
+        echo "  - Check read permissions on source files" >&2
+        echo "  - Verify user has access to: $BACKUP_SOURCE_DIR" >&2
+    elif echo "$error_output" | grep -qi "rate limit\|too many requests\|429"; then
+        echo "DIAGNOSIS: API rate limit exceeded" >&2
+        echo "  - B2 is rate limiting requests" >&2
+        echo "  - Wait and retry later" >&2
+        echo "  - Consider reducing backup frequency" >&2
+    elif echo "$error_output" | grep -qi "timeout\|timed out"; then
+        echo "DIAGNOSIS: Operation timeout" >&2
+        echo "  - Network connection may be slow" >&2
+        echo "  - Large files may need more time" >&2
+        echo "  - Check B2 service status" >&2
+    else
+        echo "DIAGNOSIS: Unknown error (see details below)" >&2
+    fi
+    
+    echo "----------------------------------------" >&2
+    echo "Full error output:" >&2
+    echo "$error_output" >&2
+    echo "========================================" >&2
+}
+
+
 # Function to check if repository is locked
 check_and_unlock() {
     echo "Checking for stale locks..."
@@ -99,7 +166,7 @@ fi
 # Check if the mounted directory is empty
 if [ -z "$(ls -A $MOUNTED_DIR)" ]; then
     echo "Mounted directory is empty. Restoring the latest backup from Backblaze B2..."
-    /restore.sh
+    /src/restore.sh
 else
     echo "Starting backup process..."
     
@@ -126,16 +193,8 @@ else
         fi
         
         if [ $BACKUP_EXIT_CODE -ne 0 ]; then
-            echo "========================================" >&2
-            echo "ERROR: Backup failed with exit code $BACKUP_EXIT_CODE" >&2
-            echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
-            echo "Source: $MOUNTED_DIR" >&2
-            echo "Repository: $RESTIC_REPOSITORY" >&2
-            echo "----------------------------------------" >&2
-            echo "Error details:" >&2
-            echo "$BACKUP_ERROR" >&2
-            echo "========================================" >&2
-            mark_failure "Restic backup command failed with exit code $BACKUP_EXIT_CODE"
+            diagnose_error "$BACKUP_ERROR" "Backup operation" "$BACKUP_EXIT_CODE"
+            mark_failure "Backup failed (exit $BACKUP_EXIT_CODE) - see logs for details"
             exit 1
         else
             echo "Backup succeeded after retry"
@@ -161,11 +220,8 @@ else
         
         if [ $CLEANUP_EXIT_CODE -ne 0 ]; then
             echo "========================================" >&2
-            echo "WARNING: Snapshot cleanup failed with exit code $CLEANUP_EXIT_CODE" >&2
-            echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
-            echo "----------------------------------------" >&2
-            echo "Error details:" >&2
-            echo "$CLEANUP_ERROR" >&2
+            echo "WARNING: Snapshot cleanup failed (backup itself was successful)" >&2
+            diagnose_error "$CLEANUP_ERROR" "Cleanup operation" "$CLEANUP_EXIT_CODE"
             echo "========================================" >&2
         else
             echo "Cleanup succeeded after retry"
