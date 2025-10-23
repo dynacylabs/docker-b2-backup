@@ -187,9 +187,14 @@ else
     log "📂 Directory contains data, skipping initial restore"
 fi
 
-# Always run backup on startup
-log "🚀 Running initial backup on startup..."
-run_backup
+# Run backup on startup if enabled (default: true)
+RUN_BACKUP_ON_STARTUP="${RUN_BACKUP_ON_STARTUP:-true}"
+if [ "$RUN_BACKUP_ON_STARTUP" = "true" ]; then
+    log "🚀 Running initial backup on startup..."
+    run_backup
+else
+    log "⏭️  Skipping initial backup (RUN_BACKUP_ON_STARTUP=false)"
+fi
 
 # Track last execution times to avoid running multiple times in the same minute
 last_backup_minute=""
