@@ -23,6 +23,7 @@ COPY src/scheduler.sh /src/scheduler.sh
 COPY src/entrypoint.sh /src/entrypoint.sh
 
 # Give execution rights on the scripts
+RUN chmod +x /src/backup.sh /src/restore.sh /src/scheduler.sh /src/entrypoint.sh
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /var/log && \
