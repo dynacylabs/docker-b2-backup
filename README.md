@@ -1,128 +1,163 @@
 # Docker B2 Backup Container
 
-A lightweight, automated backup solution using Docker, Restic, and Backblaze B2. This container automatically backs up your data to Backblaze B2 cloud storage with a simple scheduler (no cron needed!) and comprehensive health monitoring.
+A lightweight, automated backup solution using Docker, Restic, and Backblaze B2. This container automatically backs up your data to Backblaze B2 cloud storage with intelligent scheduling, automatic restore capabilities, and comprehensive health monitoring.
 
 ## ✨ Features
 
-- **🚀 Startup Backup**: Always runs backup immediately when container starts
-- **🔄 Auto-Restore**: Checks and restores if directory is empty on startup
+- **🚀 Configurable Startup Backup**: Optional backup on container start (default: enabled)
+- **🔄 Auto-Restore**: Automatically detects empty directories and restores from latest snapshot
 - **⏰ Simple Scheduler**: Cron-like syntax without the complexity (no cron daemon!)
 - **☁️ Backblaze B2 Integration**: Secure, cost-effective cloud storage
 - **🔐 Encryption**: End-to-end encryption via Restic
 - **📦 Incremental Backups**: Efficient deduplication and compression
-- **♻️ Retention Management**: Configurable snapshot retention policies
-- **🏥 Comprehensive Health Monitoring**: Automatic failure detection with detailed status
+- **♻️ Smart Retention Management**: Automatic cleanup across all container restarts
+- **🏥 Comprehensive Health Monitoring**: Automatic failure detection with detailed diagnostics
 - **👤 User Management**: Configurable user permissions to match host system
 - **🐳 Lightweight**: Alpine Linux base (~50MB image)
 - **⚙️ Environment-Driven**: Fully configurable via environment variables
+- **🔧 Intelligent Error Diagnosis**: Detailed error messages with specific troubleshooting steps
 
 ## 🏗️ Project Structure
 
 ```
 docker-b2-backup/
 ├── src/
-│   ├── backup.sh           # Main backup script with retention management
-│   ├── restore.sh          # Intelligent restore script
-│   ├── scheduler.sh        # Simple scheduler (replaces cron)
-│   ├── entrypoint.sh       # Container initialization
-│   └── healthcheck.sh      # Comprehensive health monitoring with failure detection
-├── Dockerfile              # Alpine-based container definition
-├── docker-compose.yml      # Production compose configuration
-├── example.env             # Complete configuration template
-└── README.md              # This file
+│   ├── backup.sh              # Main backup script with cross-host retention
+│   ├── restore.sh             # Intelligent restore script (no nested directories)
+│   ├── scheduler.sh           # Simple scheduler (replaces cron)
+│   ├── entrypoint.sh          # Container initialization
+│   ├── healthcheck.sh         # Comprehensive health monitoring
+│   └── fix_nested_backup.sh  # Migration tool for old backup formats
+├── Dockerfile                 # Alpine-based container definition
+├── docker-compose.yml         # Example compose configuration
+├── example.env                # Complete configuration template
+└── README.md                  # This file
 ```
 
 ## 🔧 How It Works
 
-This container uses a **simple scheduler script** instead of cron for maximum reliability:
+This container uses a **simple scheduler script** instead of cron for maximum reliability and visibility.
 
-1. **On Startup:**
-   - Checks if backup directory is empty → restores if needed
-   - Runs initial backup immediately
+### Backup Strategy
+
+**Important:** The container backs up the **contents** of the mounted directory, not the directory itself. This ensures that when you restore:
+- If you have `/backup/a`, `/backup/b`, `/backup/c`
+- They restore as `/backup/a`, `/backup/b`, `/backup/c`
+- **Not** as `/backup/backup/a`, `/backup/backup/b`, `/backup/backup/c`
+
+### Startup Behavior
+
+1. **On Container Start:**
+   - Checks if backup directory is empty → restores latest snapshot if needed
+   - Optionally runs initial backup (controlled by `RUN_BACKUP_ON_STARTUP`)
    - Starts scheduler loop
 
 2. **During Operation:**
    - Checks every 60 seconds if current time matches schedule
    - Runs backup if schedule matches
    - Runs restore check if schedule matches (only if directory is empty)
+   - Applies retention policy after each successful backup
 
-3. **Health Monitoring:**
+3. **Retention Management:**
+   - Automatically cleans up old snapshots after each backup
+   - Groups snapshots by **paths** (not hostname) for consistent cleanup across container restarts
+   - Respects configured retention policy (daily, weekly, monthly, yearly)
+
+4. **Health Monitoring:**
    - Detects backup/restore failures within 60 seconds
    - Marks container UNHEALTHY automatically
    - Enables automatic restart with autoheal
 
-**Why No Cron?**
-- ✅ Simpler - no crontab configuration
-- ✅ More reliable - no permission issues
-- ✅ Better visibility - all logs in stdout
-- ✅ Easier debugging - see exactly what's happening
-- ✅ Same flexibility - supports cron syntax
+### Why No Cron?
+
+- ✅ **Simpler** - No crontab configuration
+- ✅ **More reliable** - No permission issues
+- ✅ **Better visibility** - All logs in stdout
+- ✅ **Easier debugging** - See exactly what's happening
+- ✅ **Same flexibility** - Supports cron syntax
 
 ## 🚀 Quick Start
 
-### 1. Clone and Configure
+### 1. Prepare Your Environment
 
 ```bash
+# Create a directory for your data to backup
+mkdir -p /path/to/your/data
+
+# Clone the repository (optional - can build directly from GitHub)
 git clone https://github.com/dynacylabs/docker-b2-backup.git
 cd docker-b2-backup
-
-# Copy and edit configuration
-cp example.env .env
-nano .env  # Configure your B2 credentials and settings
 ```
 
-### 2. Configure Environment
+### 2. Create Configuration File
 
-Edit `.env` with your settings:
+Create a `.env` file or `b2-backup.env` with your settings:
 
 ```bash
 # Required: Backblaze B2 Configuration
 RESTIC_REPOSITORY=b2:your-bucket-name:backup-path
 RESTIC_PASSWORD=your-secure-restic-password
 B2_ACCOUNT_ID=your-b2-account-id
-B2_ACCOUNT_KEY=your-b2-account-key
+B2_ACCOUNT_KEY=your-b2-application-key
 
-# User Configuration (get with: id)
-PUID=1000
-PGID=1000
+# Required: Backup Source
+BACKUP_SOURCE_DIR=/backup
 
-# Optional: Customize schedules, retention, etc.
-BACKUP_SCHEDULE=0 2 * * *  # Daily at 2 AM
+# Optional: Customize schedules (cron format)
+BACKUP_SCHEDULE=0 0 * * *              # Daily at midnight
+RESTORE_CHECK_SCHEDULE=0 0 * * *       # Daily at midnight
+RUN_BACKUP_ON_STARTUP=false            # Don't backup on container start
+
+# Optional: Retention Policy
+RESTIC_KEEP_DAILY=7
+RESTIC_KEEP_WEEKLY=4
+RESTIC_KEEP_MONTHLY=6
+RESTIC_KEEP_YEARLY=2
 ```
 
-### 3. Deploy
+### 3. Create Docker Compose File
+
+```yaml
+services:
+  b2-backup:
+    build:
+      context: https://github.com/dynacylabs/docker-b2-backup.git
+      dockerfile: Dockerfile
+    container_name: b2-backup
+    volumes:
+      - /path/to/your/data:/backup
+    env_file:
+      - ./b2-backup.env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/src/healthcheck.sh"]
+      interval: 60s
+      timeout: 60s
+      retries: 3
+      start_period: 60s
+```
+
+### 4. Deploy
 
 ```bash
-# Local development with user mapping
-docker-compose -f docker-compose.local.yml up -d
-
-# Or production deployment
-docker-compose up -d
+docker compose up -d
 ```
 
-### 4. Monitor
+### 5. Monitor
 
 ```bash
 # Check container status and health
-docker-compose ps
+docker compose ps
 
 # View logs in real-time
-docker-compose logs -f
+docker compose logs -f b2-backup
 
-# Check scheduler log
-docker-compose exec backup cat /var/log/scheduler.log
+# View snapshots in repository
+docker exec b2-backup restic snapshots
 
-# Check backup log
-docker-compose exec backup cat /var/log/backup.log
-
-# View snapshots
-docker-compose exec backup restic snapshots
+# Check last backup status
+docker exec b2-backup cat /tmp/last_backup_success
 ```
-
-**Note:** The container will automatically:
-- Check if restore is needed on startup
-- Run an initial backup immediately
-- Then follow the configured schedule
 
 ## ⚙️ Configuration
 
@@ -132,53 +167,53 @@ docker-compose exec backup restic snapshots
 |----------|-------------|---------|
 | `RESTIC_REPOSITORY` | Backblaze B2 repository path | `b2:my-bucket:backups/server1` |
 | `RESTIC_PASSWORD` | Encryption password for backups | `your-secure-password` |
-| `B2_ACCOUNT_ID` | Backblaze B2 account ID | `your-account-id` |
-| `B2_ACCOUNT_KEY` | Backblaze B2 application key | `your-application-key` |
+| `B2_ACCOUNT_ID` | Backblaze B2 account ID | `005fb80d1ad8fa50000000002` |
+| `B2_ACCOUNT_KEY` | Backblaze B2 application key | `K005xJm6AX6NmZgZHKWExjGq25XUftA` |
 
 ### Optional Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BACKUP_SOURCE_DIR` | `/backup` | Directory to backup |
-| `BACKUP_TEMP_DIR` | `/tmp/backup` | Temporary staging directory |
-| `PUID` | `1000` | User ID for file ownership |
-| `PGID` | `1000` | Group ID for file ownership |
+| `BACKUP_SOURCE_DIR` | `/backup` | Directory to backup (contents, not directory itself) |
+| `BACKUP_TEMP_DIR` | `/tmp/backup` | Temporary staging directory (legacy, not used in current version) |
 | `BACKUP_SCHEDULE` | `0 2 * * *` | Schedule for backups (cron syntax) |
 | `RESTORE_CHECK_SCHEDULE` | `0 1 * * *` | Schedule for restore checks (cron syntax) |
+| `RUN_BACKUP_ON_STARTUP` | `true` | Run backup when container starts |
 | `RESTIC_KEEP_DAILY` | `7` | Daily snapshots to retain |
 | `RESTIC_KEEP_WEEKLY` | `4` | Weekly snapshots to retain |
 | `RESTIC_KEEP_MONTHLY` | `6` | Monthly snapshots to retain |
 | `RESTIC_KEEP_YEARLY` | `2` | Yearly snapshots to retain |
 | `HEALTHCHECK_FULL_INTERVAL` | `3600` | Seconds between full B2 health checks |
+| `PUID` | `1000` | User ID for file ownership (optional) |
+| `PGID` | `1000` | Group ID for file ownership (optional) |
 
 ### Cron Schedule Examples
 
 The scheduler uses familiar cron-like syntax:
 
 ```bash
-# Every 5 minutes
-BACKUP_SCHEDULE="*/5 * * * *"
+# Format: minute hour day-of-month month day-of-week
 
-# Every hour
-BACKUP_SCHEDULE="0 * * * *"
-
-# Every 6 hours
-BACKUP_SCHEDULE="0 */6 * * *"
+# Daily at midnight
+BACKUP_SCHEDULE="0 0 * * *"
 
 # Daily at 2:30 AM
 BACKUP_SCHEDULE="30 2 * * *"
 
+# Every 6 hours
+BACKUP_SCHEDULE="0 */6 * * *"
+
+# Twice daily (midnight and noon)
+BACKUP_SCHEDULE="0 0,12 * * *"
+
 # Weekly on Sunday at 2 AM
 BACKUP_SCHEDULE="0 2 * * 0"
-
-# Twice daily (2 AM and 2 PM)
-BACKUP_SCHEDULE="0 2,14 * * *"
 
 # Monthly on the 1st at 3 AM
 BACKUP_SCHEDULE="0 3 1 * *"
 
-# Every Monday at 3 AM
-BACKUP_SCHEDULE="0 3 * * 1"
+# Every 15 minutes (for testing)
+BACKUP_SCHEDULE="*/15 * * * *"
 ```
 
 **Format:** `minute hour day-of-month month day-of-week`
@@ -186,409 +221,572 @@ BACKUP_SCHEDULE="0 3 * * 1"
 - Use `*/n` for "every n units"
 - Use `1-5` for ranges
 - Use `1,3,5` for lists
+- Day of week: 0-7 (0 and 7 are Sunday)
 
 ## 📁 Volume Mounting
 
-Map your data directory to the container:
+The container backs up the **contents** of your mounted directory, not the directory itself.
 
 ```yaml
-volumes:
-  - /path/to/your/data:/backup         # Your data to backup
-  - /path/to/logs:/var/log             # Optional: persist logs
+services:
+  b2-backup:
+    volumes:
+      - /path/to/your/data:/backup     # Your data to backup
 ```
 
-**Note:** The default mount point is now `/backup` (not `/mnt/backup`).
+**Important:**
+- Mount your data directory to `/backup` (or configure `BACKUP_SOURCE_DIR`)
+- The backup will store the contents directly (no nested `/backup/backup/` structure)
+- On restore, files are placed directly in the mount point
+
+**Example:**
+If your host has `/home/user/mydata` containing `file1.txt` and `folder1/`:
+```yaml
+volumes:
+  - /home/user/mydata:/backup
+```
+
+The backup will contain:
+- `file1.txt`
+- `folder1/`
+
+On restore, they appear at:
+- `/home/user/mydata/file1.txt`
+- `/home/user/mydata/folder1/`
+
+**Not** at `/home/user/mydata/backup/file1.txt` ✅
 
 ## 👤 User Permission Management
 
-The container supports multiple user configuration methods:
+The container runs as the `backup` user (UID 1000, GID 1000 by default). Files in your backup directory should be readable by this user.
 
-### Option 1: Dynamic User Switching (Recommended)
+### Quick Setup (Most Common)
+
 ```bash
-# In .env file
-PUID=1000  # Your user ID (from: id)
-PGID=1000  # Your group ID
+# Make your data readable by the backup user
+sudo chown -R 1000:1000 /path/to/your/data
 
-# Use local compose file
-docker-compose -f docker-compose.local.yml up -d
+# Or make it world-readable (less secure)
+sudo chmod -R 755 /path/to/your/data
 ```
 
-### Option 2: Direct User Assignment
+### Custom User ID
+
+If you need different permissions, set `PUID` and `PGID`:
+
 ```bash
-# Run directly as specified user
-docker-compose -f docker-compose.local.yml --profile direct-user up backup-direct-user
+# In your .env file
+PUID=1003  # Your user ID (from: id -u)
+PGID=1003  # Your group ID (from: id -g)
 ```
 
-See [`PERMISSIONS.md`](PERMISSIONS.md) for detailed permission management guide.
-
-## 🏥 Comprehensive Health Monitoring
-
-The container includes advanced health monitoring that **automatically detects backup/restore failures** and marks the container UNHEALTHY.
-
-### How It Works
-
-The healthcheck monitors multiple layers:
-
-#### 1. **Status Markers** (Immediate Detection ~60s)
-- Backup and restore scripts write status files on failure
-- Healthcheck reads these markers immediately
-- Container goes UNHEALTHY within one healthcheck cycle
-
-#### 2. **Log Analysis** (Recent Failures)
-- Scans `backup.log` and `restore.log` for error keywords
-- Detects failures within last 24 hours
-- Looks for: "error", "failed", "fatal", "cannot", "unable to"
-
-#### 3. **Process Monitoring**
-- Verifies scheduler process is running
-- Checks required environment variables
-- Validates scripts are executable
-
-#### 4. **Success Tracking**
-- Tracks last successful backup timestamp
-- Warns if no successful backup in 48+ hours
-
-#### 5. **Periodic B2 Checks** (Every Hour)
-- Tests repository connectivity
-- Validates snapshot access
-- Performs integrity checks (1% sample)
-
-### Failure Detection
-
-**When Backup Fails:**
-1. `backup.sh` detects failure → writes `/tmp/backup_status`
-2. Next healthcheck (within 60s) → reads status marker
-3. Container marked **UNHEALTHY**
-4. Log shows: `UNHEALTHY: Backup failed Xh ago - Reason: <reason>`
-
-**When Restore Fails:**
-1. `restore.sh` detects failure → writes `/tmp/restore_status`
-2. Next healthcheck (within 60s) → reads status marker
-3. Container marked **UNHEALTHY**
-4. Log shows: `UNHEALTHY: Restore failed Xh ago - Reason: <reason>`
-
-### Health Check Configuration
+Then in your docker-compose.yml:
 
 ```yaml
-healthcheck:
-  test: ["CMD", "/src/healthcheck.sh"]
-  interval: 60s          # Run every 60 seconds
-  timeout: 30s           # Max 30s to complete
-  retries: 3             # Mark unhealthy after 3 failures
-  start_period: 30s      # Grace period on startup
+services:
+  b2-backup:
+    user: "${PUID}:${PGID}"  # Or directly: user: "1003:1003"
 ```
 
-### What Gets Checked
+## 🏥 Health Monitoring
+
+The container includes comprehensive health monitoring that automatically detects failures and marks the container as UNHEALTHY.
+
+### What Gets Monitored
 
 | Check | Frequency | Action on Failure |
 |-------|-----------|-------------------|
-| **Scheduler process** | Every 60s | UNHEALTHY |
-| **Status markers** | Every 60s | UNHEALTHY |
-| **Log analysis** | Every 60s | UNHEALTHY |
-| **Environment vars** | Every 60s | UNHEALTHY |
-| **Scripts executable** | Every 60s | UNHEALTHY |
-| **Directory exists** | Every 60s | UNHEALTHY |
-| **Success tracking** | Every 60s | WARNING only |
-| **Disk space** | Every 60s | WARNING only |
-| **B2 connectivity** | Once per hour | UNHEALTHY |
-| **Repo integrity** | Once per hour | WARNING only |
+| Scheduler process running | Every 60s | UNHEALTHY |
+| Backup status markers | Every 60s | UNHEALTHY |
+| Restore status markers | Every 60s | UNHEALTHY |
+| Recent log errors | Every 60s | UNHEALTHY |
+| Environment variables | Every 60s | UNHEALTHY |
+| Required scripts | Every 60s | UNHEALTHY |
+| Last successful backup | Every 60s | WARNING (48h+) |
+| Disk space | Every 60s | WARNING (85%+) |
+| B2 connectivity | Every 1 hour | UNHEALTHY |
+| Repository integrity | Every 1 hour | WARNING |
 
-### Monitoring Commands
-
-```bash
-# Check current health status
-docker inspect backup --format='{{.State.Health.Status}}'
-
-# View recent healthcheck output
-docker inspect backup --format='{{range .State.Health.Log}}{{.Output}}{{end}}' | tail -1
-
-# See unhealthy containers
-docker ps --filter "health=unhealthy"
-
-# Run healthcheck manually
-docker-compose exec backup /src/healthcheck.sh
-
-# Check status markers
-docker-compose exec backup cat /tmp/backup_status
-docker-compose exec backup cat /tmp/last_backup_success
-
-# View healthcheck history
-docker inspect backup --format='{{json .State.Health}}' | jq
-```
-
-### Testing Healthcheck
+### Quick Health Check
 
 ```bash
-# Simulate backup failure
-docker-compose exec backup sh -c 'echo -e "FAILED\n$(date +%s)\nTest failure" > /tmp/backup_status'
+# Check container health status
+docker ps
 
-# Wait 60 seconds, then check
-docker inspect backup | grep Health -A 5
-# Should show "Status": "unhealthy"
+# View detailed health output
+docker inspect b2-backup --format='{{.State.Health.Status}}'
 
-# Clear failure status
-docker-compose exec backup rm /tmp/backup_status
-# Container becomes healthy again after next check
+# Run manual health check
+docker exec b2-backup /src/healthcheck.sh
+
+# View last health check output
+docker inspect b2-backup --format='{{range .State.Health.Log}}{{.Output}}{{end}}' | tail -1
 ```
 
-### Automatic Recovery with Autoheal
+### Understanding Health Status
 
-Pair with autoheal to automatically restart unhealthy containers:
-
-```yaml
-autoheal:
-  image: willfarrell/autoheal
-  environment:
-    - AUTOHEAL_CONTAINER_LABEL=all
-  volumes:
-    - /var/run/docker.sock:/var/run/docker.sock
-  restart: unless-stopped
+**HEALTHY:**
+```
+2025-10-23 15:30:00 - HEALTHY: Basic check passed (next full B2 check in 3540s)
 ```
 
-When the container goes UNHEALTHY, autoheal will restart it automatically.
+**UNHEALTHY:**
+```
+2025-10-23 15:30:00 - UNHEALTHY: Backup failed 2h ago - Reason: Network timeout
+```
 
 ### Status Files
 
-The healthcheck monitors these status files:
+The container uses status files to track operations:
 
 ```bash
-/tmp/backup_status         # Written when backup fails
-/tmp/last_backup_success   # Timestamp of last successful backup
-/tmp/restore_status        # Written when restore fails
-/tmp/last_restore_success  # Timestamp of last successful restore
+/tmp/backup_status           # Written on backup failure
+/tmp/last_backup_success     # Timestamp of last successful backup
+/tmp/restore_status          # Written on restore failure  
+/tmp/last_restore_success    # Timestamp of last successful restore
 ```
 
-**Status File Format:**
-```
-FAILED                           # Line 1: Status
-1728412800                       # Line 2: Unix timestamp
-Restic backup command failed     # Line 3: Failure reason
-```
+### Auto-Recovery with Autoheal
 
-### Healthcheck Output Examples
+Combine with [autoheal](https://github.com/willfarrell/docker-autoheal) to automatically restart unhealthy containers:
 
-**Healthy:**
-```
-2025-10-08 15:30:00 - Performing basic healthcheck...
-2025-10-08 15:30:00 - HEALTHY: Basic check passed (next full B2 check in 3540s)
-```
+```yaml
+services:
+  autoheal:
+    image: willfarrell/autoheal
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=all
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
 
-**Unhealthy - Backup Failed:**
-```
-2025-10-08 15:30:00 - Performing basic healthcheck...
-2025-10-08 15:30:00 - UNHEALTHY: Backup failed 2h ago - Reason: Restic backup command failed
-```
-
-**Unhealthy - Scheduler Dead:**
-```
-2025-10-08 15:30:00 - Performing basic healthcheck...
-2025-10-08 15:30:00 - UNHEALTHY: scheduler is not running
+  b2-backup:
+    # ... your backup config
+    labels:
+      autoheal: true  # Optional: explicit label
 ```
 
-### Recovery Steps
+When the backup container goes UNHEALTHY, autoheal restarts it automatically.
 
-**Clear Failure Status:**
-```bash
-# Clear backup failure
-docker-compose exec backup rm /tmp/backup_status
-
-# Clear restore failure
-docker-compose exec backup rm /tmp/restore_status
-
-# Wait for next healthcheck (60s) - container should become healthy
-```
-
-**Force Immediate Healthcheck:**
-```bash
-docker-compose exec backup /src/healthcheck.sh
-echo $?  # 0 = healthy, 1 = unhealthy
-```
-
-**Restart Container:**
-```bash
-docker-compose restart backup
-# Check health after start_period (30s)
-```
-
-### Debugging Unhealthy Status
-
-```bash
-# Check why container is unhealthy
-docker inspect backup --format='{{range .State.Health.Log}}{{.Output}}{{end}}' | tail -1
-
-# Check all logs
-docker-compose exec backup tail -50 /var/log/backup.log
-docker-compose exec backup tail -50 /var/log/restore.log
-docker-compose exec backup tail -50 /var/log/scheduler.log
-
-# Check if scheduler is running
-docker-compose exec backup ps aux | grep scheduler
-
-# Test B2 connectivity manually
-docker-compose exec backup restic list locks
-```
-
-## 🔄 Backup Operations
+## 🔄 Backup and Restore Operations
 
 ### Automatic Operations
-- **Backup**: Runs on configured schedule
-- **Restore**: Automatic if backup directory is empty
-- **Retention**: Old snapshots cleaned up automatically
-- **Health checks**: Continuous monitoring
 
-### Manual Operations
+The container handles most operations automatically:
+
+- **Backup**: Runs on configured schedule (and optionally on startup)
+- **Restore**: Automatically restores if backup directory is empty
+- **Retention Cleanup**: Removes old snapshots after each backup
+- **Health Checks**: Continuous monitoring every 60 seconds
+
+### Manual Backup
+
 ```bash
-# Manual backup
-docker exec <container> /src/backup.sh
+# Run backup manually
+docker exec b2-backup /src/backup.sh
 
-# Manual restore
-docker exec <container> /src/restore.sh
+# The script will:
+# - Change to /backup directory
+# - Backup current directory contents (.)
+# - Apply retention policy (cleanup old snapshots)
+# - Group snapshots by paths (not hostname)
+```
 
-# List snapshots
-docker exec <container> restic snapshots
+### Manual Restore
 
-# Repository stats
-docker exec <container> restic stats
+```bash
+# Restore latest snapshot
+docker exec b2-backup /src/restore.sh
+
+# Or restore specific snapshot
+docker exec b2-backup restic restore <snapshot-id> --target /backup
+```
+
+### Snapshot Management
+
+```bash
+# List all snapshots
+docker exec b2-backup restic snapshots
+
+# View snapshot details
+docker exec b2-backup restic snapshots --compact
+
+# Repository statistics
+docker exec b2-backup restic stats
 
 # Check repository integrity
-docker exec <container> restic check
+docker exec b2-backup restic check
+
+# Check 10% of repository data
+docker exec b2-backup restic check --read-data-subset=10%
+```
+
+### Manual Cleanup
+
+```bash
+# Clean up snapshots (already runs automatically after backup)
+docker exec b2-backup restic forget \
+  --group-by paths \
+  --keep-daily 7 \
+  --keep-weekly 4 \
+  --keep-monthly 6 \
+  --keep-yearly 2 \
+  --prune
+
+# Dry run (see what would be deleted)
+docker exec b2-backup restic forget \
+  --group-by paths \
+  --keep-daily 7 \
+  --keep-weekly 4 \
+  --keep-monthly 6 \
+  --keep-yearly 2 \
+  --dry-run
+```
+
+### Migration from Old Backup Format
+
+If you're upgrading from a version that created nested `/backup/backup/` directories:
+
+```bash
+# Run the fix script
+docker exec b2-backup /src/fix_nested_backup.sh
+
+# This will:
+# - Detect nested backup directory
+# - Move contents up one level
+# - Run a fresh backup with correct structure
 ```
 
 ## 📊 Retention Policy
 
-Default retention keeps:
+The retention policy controls how many snapshots are kept. Old snapshots are automatically deleted after each successful backup.
+
+### Default Policy
+
 - **7 daily** snapshots (last week)
-- **4 weekly** snapshots (last month)
+- **4 weekly** snapshots (last ~month)
 - **6 monthly** snapshots (last 6 months)  
 - **2 yearly** snapshots (last 2 years)
 
-**Maximum snapshots**: ~19 total, optimized for storage efficiency and recovery flexibility.
+**Approximate total**: ~19 snapshots maximum
+
+### How Retention Works
+
+1. **After each backup**, the cleanup process runs automatically
+2. Snapshots are **grouped by paths** (not by hostname)
+3. This means retention works correctly even if you:
+   - Restart the container multiple times
+   - Change the container hostname
+   - Rebuild with a new container ID
+
+**Example:** If you restart your container 10 times in one day, you'll still only keep 7 daily snapshots total (not 70).
+
+### Customizing Retention
+
+Adjust the values in your env file:
+
+```bash
+# Keep more history
+RESTIC_KEEP_DAILY=14       # 2 weeks of daily backups
+RESTIC_KEEP_WEEKLY=8       # 2 months of weekly backups
+RESTIC_KEEP_MONTHLY=12     # 1 year of monthly backups
+RESTIC_KEEP_YEARLY=5       # 5 years of yearly backups
+
+# Keep less (save storage costs)
+RESTIC_KEEP_DAILY=3        # Only 3 days
+RESTIC_KEEP_WEEKLY=2       # Only 2 weeks
+RESTIC_KEEP_MONTHLY=3      # Only 3 months
+RESTIC_KEEP_YEARLY=1       # Only 1 year
+```
+
+### Important Notes
+
+- Retention is enforced **after every successful backup**
+- Uses `--group-by paths` to avoid per-hostname retention groups
+- Snapshots are permanently deleted with `--prune` flag
+- Failed cleanup doesn't fail the backup (warning only)
 
 ## 🔧 Troubleshooting
 
-### 🆕 Improved Error Diagnostics
-
-This container now provides **intelligent error diagnosis** with specific troubleshooting steps. When backups or restores fail, you'll see:
-- Clear identification of the problem (authentication, network, disk space, etc.)
-- Specific remediation steps
-- Relevant commands to run
-- Full error details for advanced debugging
-
-See **[ERROR_GUIDE.md](ERROR_GUIDE.md)** for comprehensive error diagnosis and solutions.
-
-### Quick Diagnostics
-
-```bash
-# View recent errors with diagnosis
-docker logs docker-b2-backup --tail 50
-
-# Check container health status
-docker inspect docker-b2-backup --format='{{.State.Health.Status}}'
-
-# Manual health check (shows detailed status)
-docker exec docker-b2-backup /src/healthcheck.sh
-```
-
 ### Common Issues
 
-**Container never becomes healthy:**
-- **FIXED!** ✅ Health check now properly detects successful backups
-- Check status files: `docker exec docker-b2-backup cat /tmp/backup_status`
-- View last success: `docker exec docker-b2-backup cat /tmp/last_backup_success`
+#### Multiple Snapshots on Same Day
 
-**Permission denied on backup files:**
+**Symptom:** You see multiple snapshots with the same date in `restic snapshots`
+
+**Cause:** The container runs a backup on startup by default (`RUN_BACKUP_ON_STARTUP=true`)
+
+**Solution:** 
 ```bash
-# Check and fix file ownership
-sudo chown -R $(id -u):$(id -g) ./data/
+# Disable startup backup
+echo "RUN_BACKUP_ON_STARTUP=false" >> b2-backup.env
+
+# Rebuild container
+docker compose up -d --force-recreate b2-backup
 ```
 
-**B2 authentication errors:**
+The retention policy will clean up excess snapshots on the next scheduled backup.
+
+---
+
+#### Too Many Snapshots (Retention Not Working)
+
+**Symptom:** You have dozens of snapshots instead of ~19
+
+**Cause:** Old version didn't use `--group-by paths`, so each container restart created a new retention group
+
+**Solution:**
 ```bash
-# The error will show specific diagnosis:
-# "DIAGNOSIS: Authentication failure"
-# with steps to check B2_ACCOUNT_ID and B2_ACCOUNT_KEY
+# Manual cleanup with correct grouping
+docker exec b2-backup restic forget \
+  --group-by paths \
+  --keep-daily 7 \
+  --keep-weekly 4 \
+  --keep-monthly 6 \
+  --keep-yearly 2 \
+  --prune
 
-# Verify credentials in .env file
-grep -E "B2_ACCOUNT_ID|B2_ACCOUNT_KEY" .env
-
-# Check B2 account status and key permissions in B2 console
+# Update container to latest version
+docker compose pull b2-backup  # Or rebuild from GitHub
+docker compose up -d b2-backup
 ```
 
-**Network connectivity issues:**
+---
+
+#### Nested Backup Directory (old issue)
+
+**Symptom:** Files restore to `/backup/backup/` instead of `/backup/`
+
+**Cause:** Using old backup format that backed up the directory instead of its contents
+
+**Solution:**
 ```bash
-# Diagnosis will identify network problems automatically
-# Test B2 connectivity from container:
-docker exec docker-b2-backup curl -I https://api.backblazeb2.com
+# Run the migration script
+docker exec b2-backup /src/fix_nested_backup.sh
+
+# Or manually:
+docker exec b2-backup bash -c "mv /backup/backup/* /backup/ && rmdir /backup/backup"
+docker exec b2-backup /src/backup.sh  # Create new backup with correct structure
 ```
 
-**Scheduler not running:**
+---
+
+#### Permission Denied Errors
+
+**Symptom:** Backup fails with "permission denied" errors
+
+**Solution:**
 ```bash
-# Verify scheduler is running
-docker-compose exec backup ps aux | grep scheduler
+# Option 1: Fix ownership
+sudo chown -R 1000:1000 /path/to/your/data
 
-# Check scheduler logs
-docker-compose exec backup cat /var/log/scheduler.log
+# Option 2: Make readable
+sudo chmod -R 755 /path/to/your/data
 
-# Restart container
-docker-compose restart backup
+# Option 3: Use your own UID/GID
+# In docker-compose.yml:
+user: "$(id -u):$(id -g)"
 ```
 
-**Backups not running on schedule:**
+---
+
+#### B2 Authentication Errors
+
+**Symptom:** Errors about authentication, 401, or 403
+
+**Solution:**
 ```bash
-# Check current time in container
-docker-compose exec backup date
+# Verify credentials in env file
+docker exec b2-backup env | grep B2_
+
+# Check B2 account:
+# 1. Login to Backblaze B2 console
+# 2. Verify application key hasn't expired
+# 3. Check key has proper permissions (read/write)
+# 4. Verify bucket exists
+
+# Test B2 connectivity
+docker exec b2-backup restic snapshots
+```
+
+---
+
+#### Container Marked UNHEALTHY
+
+**Symptom:** `docker ps` shows container as "unhealthy"
+
+**Solution:**
+```bash
+# Check why unhealthy
+docker inspect b2-backup --format='{{range .State.Health.Log}}{{.Output}}{{end}}' | tail -1
+
+# View detailed status
+docker exec b2-backup /src/healthcheck.sh
+
+# Check for failure markers
+docker exec b2-backup cat /tmp/backup_status
+docker exec b2-backup cat /tmp/restore_status
+
+# Clear failure status and let it retry
+docker exec b2-backup rm -f /tmp/backup_status /tmp/restore_status
+
+# Or restart container
+docker compose restart b2-backup
+```
+
+---
+
+#### Scheduler Not Running Backups
+
+**Symptom:** No backups at scheduled time
+
+**Solution:**
+```bash
+# Check scheduler is running
+docker exec b2-backup ps aux | grep scheduler
 
 # Verify schedule format
-docker-compose exec backup env | grep SCHEDULE
+docker exec b2-backup env | grep SCHEDULE
 
-# Watch scheduler log
-docker-compose exec backup tail -f /var/log/scheduler.log
+# Check container time
+docker exec b2-backup date
 
-# Test with 1-minute schedule temporarily
-# Edit .env: BACKUP_SCHEDULE=*/1 * * * *
-# Then rebuild: docker-compose up -d --force-recreate
+# Test with frequent schedule (every 2 minutes)
+# In b2-backup.env:
+BACKUP_SCHEDULE=*/2 * * * *
+
+# Watch logs
+docker logs -f b2-backup
 ```
 
-### Debug Mode
-```bash
-# Run with debug output
-docker-compose logs -f
+---
 
-# Check all log files
-docker-compose exec backup cat /var/log/scheduler.log
-docker-compose exec backup cat /var/log/backup.log
-docker-compose exec backup cat /var/log/restore.log
+### Debug Commands
+
+```bash
+# View all logs
+docker logs b2-backup --tail 100
 
 # Interactive shell
-docker-compose exec backup /bin/bash
+docker exec -it b2-backup /bin/bash
 
 # Test backup manually
-docker-compose exec backup /src/backup.sh
+docker exec b2-backup /src/backup.sh
 
-# Test restore manually
-docker-compose exec backup /src/restore.sh
+# Test restore manually  
+docker exec b2-backup /src/restore.sh
+
+# Check environment variables
+docker exec b2-backup env
+
+# List snapshots
+docker exec b2-backup restic snapshots
+
+# Repository info
+docker exec b2-backup restic stats
+
+# Health status
+docker exec b2-backup /src/healthcheck.sh
+echo $?  # 0 = healthy, 1 = unhealthy
 ```
+
+### Getting Help
+
+If you encounter issues:
+
+1. Check this troubleshooting section
+2. Enable debug logging: `docker logs -f b2-backup`
+3. Run manual health check: `docker exec b2-backup /src/healthcheck.sh`
+4. Check [GitHub Issues](https://github.com/dynacylabs/docker-b2-backup/issues)
+5. Open a new issue with:
+   - Container logs
+   - Health check output
+   - Your docker-compose.yml (redact credentials)
+   - Steps to reproduce
 
 ## 💡 Best Practices
 
-1. **Test Your Backup**: Run a test restore regularly to verify backups work
-2. **Monitor Health**: Use healthcheck status and set up alerts for UNHEALTHY state
-3. **Security**: Use application keys with minimal required B2 permissions
-4. **Retention**: Adjust retention policies based on recovery needs and storage budget
-5. **Startup Behavior**: Remember the container runs backup immediately on start
-6. **Log Review**: Check `/var/log/scheduler.log` periodically for any warnings
-7. **Disk Space**: Monitor backup source directory disk usage (alerts at 85%+)
-8. **B2 Costs**: Full healthchecks run hourly to minimize B2 API calls
-9. **Autoheal**: Pair with autoheal for automatic recovery from failures
-10. **Updates**: Keep the container image updated for security patches
+1. **Test Your Backups Regularly**
+   ```bash
+   # Restore to a test directory periodically
+   docker exec b2-backup restic restore latest --target /tmp/restore-test
+   ```
+
+2. **Monitor Health Status**
+   ```bash
+   # Set up monitoring alerts for unhealthy containers
+   docker ps --filter "health=unhealthy"
+   ```
+
+3. **Secure Your Credentials**
+   - Use application keys with minimal B2 permissions (read/write to specific bucket)
+   - Store `.env` files securely (never commit to git)
+   - Rotate B2 keys periodically
+
+4. **Optimize Retention Policy**
+   - Balance recovery needs vs. storage costs
+   - Daily backups are for recent recovery (7 days)
+   - Weekly/monthly for longer-term recovery
+   - Yearly for compliance/archival
+
+5. **Configure Startup Backup**
+   - Set `RUN_BACKUP_ON_STARTUP=false` for production (avoids duplicate backups)
+   - Keep `true` for testing or critical systems
+
+6. **Schedule Wisely**
+   - Run backups during low-activity periods
+   - Avoid overlapping backup and restore schedules
+   - Common: `BACKUP_SCHEDULE=0 0 * * *` (midnight daily)
+
+7. **Monitor Disk Space**
+   - The healthcheck warns at 85% disk usage
+   - Monitor backup source directory size
+   - Prune old files before they're backed up
+
+8. **Understand Retention Grouping**
+   - Retention is by **paths**, not hostname
+   - Container restarts don't create separate retention groups
+   - All snapshots are treated as one logical backup set
+
+9. **Use Autoheal for Recovery**
+   ```yaml
+   # Add to docker-compose.yml
+   autoheal:
+     image: willfarrell/autoheal
+     volumes:
+       - /var/run/docker.sock:/var/run/docker.sock
+     restart: unless-stopped
+   ```
+
+10. **Keep Container Updated**
+    ```bash
+    # Pull latest changes
+    docker compose pull b2-backup
+    # Or rebuild from GitHub
+    docker compose up -d --build b2-backup
+    ```
 
 ## 🤝 Contributing
 
+Contributions are welcome! Please:
+
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
 4. Test thoroughly
-5. Submit a pull request
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
+
+## 📝 Changelog
+
+### Recent Improvements
+
+- ✅ **Fixed nested backup directory issue** - Now backs up directory contents, not the directory itself
+- ✅ **Fixed retention policy** - Uses `--group-by paths` to cleanup across all container restarts
+- ✅ **Added configurable startup backup** - `RUN_BACKUP_ON_STARTUP` environment variable
+- ✅ **Improved error diagnostics** - Detailed error messages with specific troubleshooting
+- ✅ **Added migration tool** - `fix_nested_backup.sh` for upgrading from old format
 
 ## 📄 License
 
@@ -596,6 +794,16 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## 🙏 Acknowledgments
 
-- [Restic](https://restic.net/) - Fast, secure backup program
-- [Backblaze B2](https://www.backblaze.com/b2/) - Affordable cloud storage
-- [Alpine Linux](https://alpinelinux.org/) - Lightweight container base
+- [Restic](https://restic.net/) - Fast, secure, efficient backup program
+- [Backblaze B2](https://www.backblaze.com/b2/) - Affordable, reliable cloud storage
+- [Alpine Linux](https://alpinelinux.org/) - Lightweight, secure container base
+
+## 📞 Support
+
+- **Issues**: [GitHub Issues](https://github.com/dynacylabs/docker-b2-backup/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/dynacylabs/docker-b2-backup/discussions)
+- **Documentation**: This README and inline code comments
+
+---
+
+**Made with ❤️ by [Dynacylabs](https://github.com/dynacylabs)**
