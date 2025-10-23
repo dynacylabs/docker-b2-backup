@@ -177,50 +177,25 @@ fi
 if [ -z "$(ls -A $RESTORE_DIR)" ]; then
     echo "Restore directory is empty. Restoring the latest backup from Backblaze B2..."
     
-    # Create a temporary restore directory
-    TEMP_RESTORE="/tmp/restore_temp"
-    mkdir -p "$TEMP_RESTORE"
-    
-    # Restore the latest backup to temporary directory
-    RESTORE_ERROR=$(restic restore latest --target "$TEMP_RESTORE" 2>&1)
+    # Restore the latest backup directly to the restore directory
+    RESTORE_ERROR=$(restic restore latest --target "$RESTORE_DIR" 2>&1)
     RESTORE_EXIT_CODE=$?
     if [ $RESTORE_EXIT_CODE -ne 0 ]; then
         # Check if this is a lock error and retry once
         if handle_lock_error "$RESTORE_ERROR" "restore"; then
             echo "Retrying restore after lock removal..." >&2
-            RESTORE_ERROR=$(restic restore latest --target "$TEMP_RESTORE" 2>&1)
+            RESTORE_ERROR=$(restic restore latest --target "$RESTORE_DIR" 2>&1)
             RESTORE_EXIT_CODE=$?
         fi
         
         if [ $RESTORE_EXIT_CODE -ne 0 ]; then
             diagnose_error "$RESTORE_ERROR" "Restore operation" "$RESTORE_EXIT_CODE"
             mark_failure "Restore failed (exit $RESTORE_EXIT_CODE) - see logs for details"
-            rm -rf "$TEMP_RESTORE"
             exit 1
         else
             echo "Restore succeeded after retry"
         fi
     fi
-    
-    # Check if restore created nested structure (old backups) or direct structure (new backups)
-    if [ -d "$TEMP_RESTORE/tmp/backup" ]; then
-        echo "Detected old backup format with nested directories. Moving files to correct location..."
-        # Move files from nested structure
-        mv "$TEMP_RESTORE/tmp/backup/"* "$RESTORE_DIR/" 2>/dev/null || true
-        mv "$TEMP_RESTORE/tmp/backup/".* "$RESTORE_DIR/" 2>/dev/null || true
-    elif [ -d "$TEMP_RESTORE$(basename $RESTORE_DIR)" ]; then
-        echo "Detected new backup format. Moving files to correct location..."
-        # Move files from backup directory structure
-        mv "$TEMP_RESTORE$(basename $RESTORE_DIR)/"* "$RESTORE_DIR/" 2>/dev/null || true
-        mv "$TEMP_RESTORE$(basename $RESTORE_DIR)/".* "$RESTORE_DIR/" 2>/dev/null || true
-    else
-        echo "Direct restore structure detected. Moving files..."
-        # Move everything from temp to restore directory
-        find "$TEMP_RESTORE" -mindepth 1 -maxdepth 1 -exec mv {} "$RESTORE_DIR/" \; 2>/dev/null || true
-    fi
-    
-    # Clean up temporary directory
-    rm -rf "$TEMP_RESTORE"
     
     # Verify restore succeeded (directory should not be empty)
     if [ -z "$(ls -A $RESTORE_DIR)" ]; then
@@ -228,8 +203,6 @@ if [ -z "$(ls -A $RESTORE_DIR)" ]; then
         echo "ERROR: Restore completed but directory is still empty" >&2
         echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S %Z')" >&2
         echo "Target directory: $RESTORE_DIR" >&2
-        echo "Temp restore directory contents:" >&2
-        ls -la "$TEMP_RESTORE" 2>&1 || echo "Temp directory already cleaned up" >&2
         echo "========================================" >&2
         mark_failure "Restore completed but no files were restored"
         exit 1

@@ -180,15 +180,18 @@ else
     # Initialize the Restic repository if it doesn't exist
     restic init || true
 
-    # Backup the mounted directory directly to Backblaze B2
+    # Backup the contents of the mounted directory directly to Backblaze B2
     # Use --tag to identify the backup source
-    BACKUP_ERROR=$(restic backup "$MOUNTED_DIR" --tag "$(hostname)" --tag "backup-$(date +%Y%m%d)" 2>&1)
+    # Change to the directory and backup its contents to avoid nested directory structure on restore
+    cd "$MOUNTED_DIR"
+    BACKUP_ERROR=$(restic backup . --tag "$(hostname)" --tag "backup-$(date +%Y%m%d)" 2>&1)
     BACKUP_EXIT_CODE=$?
     if [ $BACKUP_EXIT_CODE -ne 0 ]; then
         # Check if this is a lock error and retry once
         if handle_lock_error "$BACKUP_ERROR" "backup"; then
             echo "Retrying backup after lock removal..." >&2
-            BACKUP_ERROR=$(restic backup "$MOUNTED_DIR" --tag "$(hostname)" --tag "backup-$(date +%Y%m%d)" 2>&1)
+            cd "$MOUNTED_DIR"
+            BACKUP_ERROR=$(restic backup . --tag "$(hostname)" --tag "backup-$(date +%Y%m%d)" 2>&1)
             BACKUP_EXIT_CODE=$?
         fi
         
