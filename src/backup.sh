@@ -211,13 +211,13 @@ else
     KEEP_YEARLY="${RESTIC_KEEP_YEARLY:-2}"
 
     echo "Cleaning up old snapshots (keeping: ${KEEP_DAILY} daily, ${KEEP_WEEKLY} weekly, ${KEEP_MONTHLY} monthly, ${KEEP_YEARLY} yearly)..."
-    CLEANUP_ERROR=$(restic forget --keep-daily $KEEP_DAILY --keep-weekly $KEEP_WEEKLY --keep-monthly $KEEP_MONTHLY --keep-yearly $KEEP_YEARLY --prune 2>&1)
+    CLEANUP_ERROR=$(restic forget --group-by paths --keep-daily $KEEP_DAILY --keep-weekly $KEEP_WEEKLY --keep-monthly $KEEP_MONTHLY --keep-yearly $KEEP_YEARLY --prune 2>&1)
     CLEANUP_EXIT_CODE=$?
     if [ $CLEANUP_EXIT_CODE -ne 0 ]; then
         # Check if this is a lock error and retry once
         if handle_lock_error "$CLEANUP_ERROR" "cleanup"; then
             echo "Retrying cleanup after lock removal..." >&2
-            CLEANUP_ERROR=$(restic forget --keep-daily $KEEP_DAILY --keep-weekly $KEEP_WEEKLY --keep-monthly $KEEP_MONTHLY --keep-yearly $KEEP_YEARLY --prune 2>&1)
+            CLEANUP_ERROR=$(restic forget --group-by paths --keep-daily $KEEP_DAILY --keep-weekly $KEEP_WEEKLY --keep-monthly $KEEP_MONTHLY --keep-yearly $KEEP_YEARLY --prune 2>&1)
             CLEANUP_EXIT_CODE=$?
         fi
         
